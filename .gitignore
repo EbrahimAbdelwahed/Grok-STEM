@@ -1,0 +1,180 @@
+# .gitignore
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+pytestdebug.log
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+docs/auto_examples/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# PEP 582; used by PDM, PEP 582 proposal
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments & Secrets
+.env
+.env.*
+!.env.example # Make sure example files are NOT ignored
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# VS Code specific (allow shared settings)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# Ruff cache
+.ruff_cache/
+
+# IDE specific folders
+.idea/
+.project
+.classpath
+*.swp
+
+# Node.js / Frontend specific
+node_modules/
+frontend/dist/ # Vite/frontend build output
+frontend/coverage/ # Test coverage reports
+frontend/.eslintcache
+frontend/.stylelintcache
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn.lock # Often committed, but can be ignored if using package-lock.json consistently
+package-lock.json # Usually committed, ignore if using yarn.lock
+pnpm-debug.log*
+lerna-debug.log*
+.npm
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Docker specific
+docker-compose.override.yml
+qdrant_storage/ # Ignore local Qdrant data if mapped directly (prefer named volumes)
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+Desktop.ini
+.qodo

@@ -1,0 +1,30 @@
+# backend/requirements.txt
+
+# Core ASGI Framework & Server
+fastapi>=0.110.0,<0.112.0 # Using a specific minor range for stability
+uvicorn[standard]>=0.29.0,<0.31.0 # Includes standard dependencies like websockets
+
+# Data Validation
+pydantic>=2.6.0,<3.0.0
+pydantic-settings>=2.1.0,<3.0.0  # For configuration management
+
+# LLM & AI SDKs
+openai>=1.14.0,<2.0.0      # For interacting with Grok (via custom base_url) & GPT-4o-mini
+# langchain>=0.1.0,<0.3.0   # Add if we decide to use Langchain heavily later
+# langchain-openai>=0.1.0,<0.3.0 # Add if using Langchain with OpenAI SDK based models
+
+# Vector Database Client
+qdrant-client>=1.7.0,<1.10.0
+
+# Environment Variable Management
+python-dotenv>=1.0.0,<2.0.0
+
+# WebSocket support directly within FastAPI/Uvicorn
+websockets>=12.0,<13.0
+
+# Optional: For potential async operations if not using Langchain's async features
+# httpx>=0.27.0,<0.28.0
+
+# Placeholder for potential future RAG libraries (e.g., if not using Langchain's versions)
+# sentence-transformers>=2.0.0
+# datasets>=2.0.0 # If loading datasets directly

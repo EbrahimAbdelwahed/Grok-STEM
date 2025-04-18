@@ -1,0 +1,19 @@
+
+{
+  "compilerOptions": {
+    // …your existing options…
+    "jsx": "react-jsx",
+    "module": "esnext",                // <-- allow import.meta
+    "target": "es2022",        // <-- enable JSX support
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "esModuleInterop": true,                // <-- allow default-imports from export= modules
+    "allowSyntheticDefaultImports": true  
+  },
+  "include": [
+    "src",
+    "node_modules/@types"
+  ]
+}
