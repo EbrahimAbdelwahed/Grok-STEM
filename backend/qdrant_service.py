@@ -2,7 +2,7 @@
 
 import logging
 from qdrant_client import QdrantClient as QdrantClientLib, models
-from qdrant_client.http.models import Distance, VectorParams
+from qdrant_client.models import Distance, VectorParams
 from config import settings
 
 logger = logging.getLogger(__name__)

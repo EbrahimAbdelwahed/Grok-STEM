@@ -15,7 +15,7 @@ try:
     from backend.qdrant_service import qdrant_client # Use the initialized client
     # Import necessary Qdrant models directly
     from qdrant_client import models
-    from qdrant_client.http.models import Distance, VectorParams
+    from qdrant_client.models import Distance, VectorParams
     # We need the vector dimensions. We could import them from rag_utils,
     # but that might load models unnecessarily here. Let's define them
     # explicitly based on the chosen models, or better, add them to config.

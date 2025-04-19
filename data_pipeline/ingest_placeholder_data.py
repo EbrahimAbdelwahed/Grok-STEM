@@ -17,7 +17,7 @@ try:
     # Import the RAG encoder *directly* from rag_utils to generate embeddings
     from backend.rag_utils import rag_encoder, RAG_VECTOR_DIM
     from qdrant_client import models
-    from qdrant_client.http.models import PointStruct
+    from qdrant_client.models import PointStruct
 except ImportError as e:
     print(f"Error importing backend modules. Run from project root.")
     print(f"ImportError: {e}")

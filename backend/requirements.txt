@@ -26,5 +26,5 @@ websockets>=12.0,<13.0
 # httpx>=0.27.0,<0.28.0
 
 # Placeholder for potential future RAG libraries (e.g., if not using Langchain's versions)
-# sentence-transformers>=2.0.0
-# datasets>=2.0.0 # If loading datasets directly
+ sentence-transformers>=2.0.0
+ datasets>=2.0.0 # If loading datasets directly
