@@ -3,6 +3,8 @@
 import sys
 import os
 import logging
+from backend.qdrant_service import qdrant_client
+
 
 # Add backend directory to sys.path to allow importing config, clients etc.
 # This assumes the script is run from the project root directory (e.g., `python data_pipeline/create_collections.py`)
@@ -10,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 try:
     from backend.config import settings
-    from backend.qdrant_client import qdrant_client # Use the initialized client
+    from backend.qdrant_service import qdrant_client # Use the initialized client
     # Import necessary Qdrant models directly
     from qdrant_client import models
     from qdrant_client.http.models import Distance, VectorParams

@@ -1,72 +1,103 @@
-# backend/config.py
+# backend/rag_utils.py
 
-import os
-import json
-from pathlib import Path
-from typing import List, Optional, Union
-from pydantic import Field, AnyHttpUrl
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from dotenv import load_dotenv
+import logging
+import uuid
+from typing import List, Optional, Dict, Any
 
-# Load settings from .env file if it exists
-# You can override these with actual environment variables
-load_dotenv()
+from qdrant_client import models
+from sentence_transformers import SentenceTransformer
 
-# Determine the base directory of the project (one level up from backend)
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Absolute import for the local Qdrant service module (to avoid shadowing)
+from qdrant_service import qdrant_client
+from config import settings
+from schemas import SemanticCacheItem
 
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+logger = logging.getLogger(__name__)
 
-    # --- LLM API Keys & Config ---
-    xai_api_key: Optional[str] = Field(None, validation_alias='XAI_API_KEY')
-    xai_base_url: Optional[Union[str, AnyHttpUrl]] = Field(None, validation_alias='XAI_BASE_URL')
-    openai_api_key: Optional[str] = Field(None, validation_alias='OPENAI_API_KEY')
+# --- Embedding Models ---
+try:
+    logger.info("Loading embedding models...")
+    rag_embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    rag_encoder = SentenceTransformer(rag_embedding_model_name)
+    RAG_VECTOR_DIM = rag_encoder.get_sentence_embedding_dimension()
+    logger.info(f"RAG encoder '{rag_embedding_model_name}' loaded (Dim: {RAG_VECTOR_DIM}).")
 
-    # Model names (allow overriding via env vars)
-    reasoning_model_name: str = Field("grok-3-mini-beta", validation_alias='REASONING_MODEL_NAME')
-    plotting_model_name: str = Field("gpt-4o-mini", validation_alias='PLOTTING_MODEL_NAME')
+    cache_embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    cache_encoder = SentenceTransformer(cache_embedding_model_name)
+    CACHE_VECTOR_DIM = cache_encoder.get_sentence_embedding_dimension()
+    logger.info(f"Cache encoder '{cache_embedding_model_name}' loaded (Dim: {CACHE_VECTOR_DIM}).")
+except Exception as e:
+    logger.error(f"Failed to load embedding models: {e}", exc_info=True)
+    rag_encoder = None
+    cache_encoder = None
 
-    # --- Qdrant Configuration ---
-    qdrant_url: str = Field("http://localhost:6333", validation_alias='QDRANT_URL')
-    qdrant_api_key: Optional[str] = Field(None, validation_alias='QDRANT_API_KEY')
-    qdrant_rag_collection: str = Field("stem_rag_kb", validation_alias='QDRANT_RAG_COLLECTION')
-    qdrant_cache_collection: str = Field("semantic_cache", validation_alias='QDRANT_CACHE_COLLECTION')
-
-    # --- RAG & Cache Settings ---
-    rag_num_results: int = Field(2, validation_alias='RAG_NUM_RESULTS') # Number of docs to retrieve
-    cache_threshold: float = Field(0.90, validation_alias='CACHE_THRESHOLD') # Similarity threshold for cache hit
-
-    # --- Backend Settings ---
-    log_level: str = Field("INFO", validation_alias='LOG_LEVEL')
-    _cors_allowed_origins: str = Field("http://localhost:5173", validation_alias='CORS_ALLOWED_ORIGINS')
-
-    @property
-    def cors_allowed_origins(self) -> List[str]:
-        if isinstance(self._cors_allowed_origins, str):
-            return [origin.strip() for origin in self._cors_allowed_origins.split(',')]
+# --- RAG Retrieval ---
+async def search_rag_kb(query: str, k: int = settings.rag_num_results) -> List[str]:
+    if not qdrant_client or not rag_encoder:
+        logger.error("Qdrant client or RAG encoder not initialized.")
+        return []
+    try:
+        query_vector = rag_encoder.encode(query).tolist()
+        search_result = await qdrant_client.search(
+            collection_name=settings.qdrant_rag_collection,
+            query_vector=query_vector,
+            limit=k,
+        )
+        contexts = [hit.payload.get("text_content", "") for hit in search_result if hit.payload]
+        logger.info(f"RAG search for '{query[:50]}...' found {len(contexts)} contexts.")
+        return contexts
+    except Exception as e:
+        logger.error(f"Error during RAG search: {e}", exc_info=True)
         return []
 
-    # Pydantic settings configuration
-    model_config = SettingsConfigDict(
-        env_file='.env',        # Load from .env file in the current directory (backend/)
-        env_file_encoding='utf-8',
-        extra='ignore'          # Ignore extra fields not defined in the model
-    )
+# --- Semantic Cache ---
+async def search_semantic_cache(query: str, threshold: float = settings.cache_threshold) -> Optional[List[Dict[str, Any]]]:
+    if not qdrant_client or not cache_encoder:
+        logger.error("Qdrant client or Cache encoder not initialized.")
+        return None
+    try:
+        query_vector = cache_encoder.encode(query).tolist()
+        search_result = await qdrant_client.search(
+            collection_name=settings.qdrant_cache_collection,
+            query_vector=query_vector,
+            limit=1,
+            score_threshold=threshold,
+        )
+        if search_result:
+            hit = search_result[0]
+            logger.info(f"Semantic cache hit for '{query[:50]}...' with score {hit.score:.4f}")
+            cached_response = hit.payload.get("response_data") if hit.payload else None
+            if isinstance(cached_response, list):
+                return cached_response
+            logger.warning(f"Cache hit but invalid response_data type: {type(cached_response)}")
+        return None
+    except Exception as e:
+        logger.error(f"Error during semantic cache search: {e}", exc_info=True)
+        return None
 
-# Create a single instance of the settings to be imported elsewhere
-settings = Settings()
-
-# --- Example Usage ---
-if __name__ == "__main__":
-    print("Loaded Settings:")
-    print(f"  Grok API Key: {'*' * (len(settings.xai_api_key) - 4) + settings.xai_api_key[-4:] if settings.xai_api_key else 'Not Set'}")
-    print(f"  Grok Base URL: {settings.xai_base_url if settings.xai_base_url else 'Not Set'}")
-    print(f"  OpenAI API Key: {'*' * (len(settings.openai_api_key) - 4) + settings.openai_api_key[-4:] if settings.openai_api_key else 'Not Set'}")
-    print(f"  Reasoning Model: {settings.reasoning_model_name}")
-    print(f"  Plotting Model: {settings.plotting_model_name}")
-    print(f"  Qdrant URL: {settings.qdrant_url}")
-    print(f"  Qdrant RAG Collection: {settings.qdrant_rag_collection}")
-    print(f"  Qdrant Cache Collection: {settings.qdrant_cache_collection}")
-    print(f"  Log Level: {settings.log_level}")
-    print(f"  Allowed Origins: {settings.cors_allowed_origins}")
+async def add_to_semantic_cache(query: str, response_data: List[Dict[str, Any]]):
+    if not qdrant_client or not cache_encoder:
+        logger.error("Cannot add to cache: Qdrant client or Cache encoder not initialized.")
+        return
+    try:
+        query_vector = cache_encoder.encode(query).tolist()
+        point_id = str(uuid.uuid4())
+        payload = {
+            "question_text": query,
+            "response_data": response_data,
+            # Add additional metadata if desired
+        }
+        await qdrant_client.upsert(
+            collection_name=settings.qdrant_cache_collection,
+            points=[
+                models.PointStruct(
+                    id=point_id,
+                    vector=query_vector,
+                    payload=payload
+                )
+            ],
+            wait=False
+        )
+        logger.info(f"Added '{query[:50]}...' to semantic cache.")
+    except Exception as e:
+        logger.error(f"Error adding to semantic cache: {e}", exc_info=True)

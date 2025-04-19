@@ -5,13 +5,15 @@ import sys
 import os
 import logging
 import uuid
+from backend.qdrant_service import qdrant_client
+
 
 # Add backend directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 try:
     from backend.config import settings
-    from backend.qdrant_client import qdrant_client
+    from backend.qdrant_service import qdrant_client
     # Import the RAG encoder *directly* from rag_utils to generate embeddings
     from backend.rag_utils import rag_encoder, RAG_VECTOR_DIM
     from qdrant_client import models
