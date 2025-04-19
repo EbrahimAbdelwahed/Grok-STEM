@@ -5,10 +5,10 @@
 FROM python:3.11-slim
 
 # 2. Set environment variables
-# Prevents Python from writing pyc files to disc (optional)
-ENV PYTHONDONTWRITEBYTECODE 1
+# Prevents Python from writing pyc files to disc (optional) 
+ENV PYTHONDONTWRITEBYTECODE=1
 # Ensures Python output is sent straight to the terminal without buffering
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONUNBUFFERED=1
 
 # 3. Set the working directory in the container
 WORKDIR /app
@@ -18,7 +18,7 @@ WORKDIR /app
 
 # 5. Install Python dependencies
 # Copy only the requirements file first to leverage Docker cache
-COPY requirements.txt .
+COPY requirements.txt /app/requirements.txt
 # Upgrade pip and install packages
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt

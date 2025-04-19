@@ -28,3 +28,5 @@ websockets>=12.0,<13.0
 # Placeholder for potential future RAG libraries (e.g., if not using Langchain's versions)
  sentence-transformers>=2.0.0
  datasets>=2.0.0 # If loading datasets directly
+
+hf_xet>=0.1.0,<0.2.0 # For Hugging Face model management

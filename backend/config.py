@@ -39,33 +39,31 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO", validation_alias='LOG_LEVEL')
 
     # Define CORS origins (example, adjust as needed)
-    cors_allowed_origins: List[str] = Field(
-        default_factory=lambda: ["http://localhost", "http://localhost:5173"],
-        validation_alias='CORS_ALLOWED_ORIGINS'
+        # Raw CORS origins from env var (JSON list or comma-separated)
+    cors_allowed_origins_raw: Optional[str] = Field(
+        None,
+        validation_alias='CORS_ALLOWED_ORIGINS',
     )
 
-    # Validator to handle comma-separated or JSON list in env var
-    @field_validator("cors_allowed_origins", mode="before")
-    def _parse_origins(cls, v):
-        if isinstance(v, str):
-            # Try JSON list first
-            try:
-                import json
-                parsed = json.loads(v)
-                if isinstance(parsed, list):
-                    return parsed
-            except Exception:
-                pass
-            # Fallback: comma-separated
-            return [entry.strip() for entry in v.split(",") if entry.strip()]
-        return v
-
-    # Pydantic settings configuration
-    model_config = SettingsConfigDict(
-        env_file='.env',
-        env_file_encoding='utf-8',
-        extra='ignore'
-    )
+    @property
+    def cors_allowed_origins(self) -> List[str]:
+        """
+        Parsed CORS origins as a list of strings. Supports JSON lists or comma-separated values.
+        """
+        raw = self.cors_allowed_origins_raw
+        # Use default if not set
+        if not raw:
+            return ["http://localhost", "http://localhost:5173"]
+        # Try JSON list
+        try:
+            import json
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed]
+        except Exception:
+            pass
+        # Fallback: comma-separated
+        return [orig.strip() for orig in raw.split(',') if orig.strip()]
 
 # Create a single instance for import elsewhere
 settings = Settings()
