@@ -13,10 +13,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     // Make the server accessible externally (needed for Docker)
-    host: '0.0.0.0',
+    host: true,
     // Port matching docker-compose.yml and EXPOSE in Dockerfile
     port: 5173,
-    allowedHosts: ['24da-34-17-20-53.ngrok-free.app'], // Added allowed host
+    allowedHosts: ['4ce9-34-17-20-53.ngrok-free.app'], // Added allowed host
     // Optional: Enable polling for file changes if HMR isn't working reliably in Docker
     watch: {
       usePolling: true,
