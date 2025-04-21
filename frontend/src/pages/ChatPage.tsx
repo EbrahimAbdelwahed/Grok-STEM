@@ -38,7 +38,7 @@ export const ChatPage: React.FC = () => {
   const ws = useRef<WebSocket | null>(null);
   // Ref to store the ID of the assistant message currently being generated
   const currentAssistantMessageId = useRef<string | null>(null);
-  const [messagesContainerRef, messagesEndRef] = useScrollToBottom<HTMLDivElement>();
+  const [messagesContainerRef, messagesEndRef] = useScrollToBottom<HTMLDivElement>([messages.length]);
 
   // --- WebSocket Connection Logic ---
   const connectWebSocket = useCallback(() => {

@@ -24,10 +24,20 @@ RUN npm install --save-dev @types/node
 # 5. Copy the rest of the application code
 COPY . .
 
-# 6. Expose the port the Vite dev server runs on (default is 5173)
+# 6. Create a lightweight nginx configuration for client-side routing
+RUN echo 'server { \
+  listen 5173; \
+  location / { \
+    root /usr/share/nginx/html; \
+    index index.html; \
+    try_files $uri $uri/ /index.html; \
+  } \
+}' > /app/nginx.conf
+
+# 7. Expose the port the Vite dev server runs on (default is 5173)
 EXPOSE 5173
 
-# 7. Define the default command to run the Vite dev server
+# 8. Define the default command to run the Vite dev server
 # The '--host' flag makes it accessible outside the container
 CMD ["npm", "run", "dev", "--", "--host"]
 # If using yarn:

@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
-    // …your existing options…
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] },
     "jsx": "react-jsx",
     "module": "esnext",                // <-- allow import.meta
     "target": "es2022",        // <-- enable JSX support

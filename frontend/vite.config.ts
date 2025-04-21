@@ -16,13 +16,30 @@ export default defineConfig({
     host: true,
     // Port matching docker-compose.yml and EXPOSE in Dockerfile
     port: 5173,
-    allowedHosts: ['4ce9-34-17-20-53.ngrok-free.app'], // Added allowed host
+    allowedHosts: ['5724-34-17-20-53.ngrok-free.app'], // Added allowed host
     // Optional: Enable polling for file changes if HMR isn't working reliably in Docker
     watch: {
       usePolling: true,
       interval: 1000 // Check for changes every second
+    },
+    // Add SPA fallback
+    fs: {
+      strict: true,
+    },
+    // Add WebSocket proxy configuration
+    proxy: {
+      '/ws': {
+        target: 'ws://backend:8000',
+        ws: true,
+        changeOrigin: true
+      }
     }
   },
+  preview: {
+    port: 5173
+  },
+  // Add base path and rewrite rules
+  base: '/',
   resolve: {
     alias: {
       // Setup '@' alias to point to the 'src' directory

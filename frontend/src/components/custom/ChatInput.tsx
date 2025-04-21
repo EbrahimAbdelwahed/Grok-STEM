@@ -1,8 +1,8 @@
 // frontend/src/components/custom/ChatInput.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { Textarea } from "@/ui/textarea";
-import { cn } from "@/lib/utils";
-import { Button } from "@/ui/button";
+import { Textarea } from "../ui/textarea";
+import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
 import { ArrowUp, Info } from "lucide-react"; // Replaced custom icon
 // import { toast } from 'sonner'; // Assuming Sonner for notifications
 import { motion } from 'framer-motion';

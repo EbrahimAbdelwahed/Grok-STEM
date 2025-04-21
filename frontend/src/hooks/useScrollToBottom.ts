@@ -5,11 +5,14 @@ import { useEffect, useRef, RefObject, useState } from 'react';
 /**
  * Custom hook to automatically scroll a container to its bottom when content changes.
  * Also includes logic to only auto-scroll if the user is already near the bottom.
+ * @param deps - Array of dependencies that should trigger re-evaluation (e.g. messages.length)
  * @returns A tuple containing:
  *   - ref for the scrollable container element.
  *   - ref for an element placed at the end of the content to scroll to.
  */
-export function useScrollToBottom<T extends HTMLElement>(): [
+export function useScrollToBottom<T extends HTMLElement>(
+  deps: unknown[] = []
+): [
   RefObject<T>, // containerRef
   RefObject<HTMLDivElement> // endRef (using HTMLDivElement for simplicity)
 ] {
@@ -53,15 +56,8 @@ export function useScrollToBottom<T extends HTMLElement>(): [
       end.scrollIntoView({ behavior: 'instant', block: 'end' });
     }
 
-  }, [messages?.length, isNearBottom]); // Re-run when messages change (or specific content) OR if user scrolls back down
-  // Note: Depending on how content streams, you might need a more sophisticated trigger than messages.length
-  // Consider triggering based on a dependency that changes when *any* message content updates.
+  }, [isNearBottom, ...deps]); // Re-run when deps change OR if user scrolls back down
 
 
   return [containerRef, endRef];
 }
-
-// Helper type if needed elsewhere (adjust based on actual message structure)
-// This is just an example dependency for the useEffect trigger.
-// Replace with the actual dependency that signals new content or stream updates.
-declare const messages: Array<{ id: string; [key: string]: any }> | undefined;

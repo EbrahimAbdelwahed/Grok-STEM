@@ -127,6 +127,40 @@ async def websocket_endpoint(websocket: WebSocket):
 #         logger.error(f"Error during startup collection check: {e}", exc_info=True)
 #     logger.info("Startup tasks finished.")
 
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pathlib import Path
+
+# Path to the Vite build output
+frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if frontend_dist.exists():
+    # Serve all files in /dist at the root URL.
+    # Requesting /assets/* etc. will now work.
+    app.mount(
+        "/",                       # mount at root
+        StaticFiles(directory=str(frontend_dist), html=True),
+        name="frontend"
+    )
+    logger.info(f"Serving React build from {frontend_dist}")
+else:
+    logger.warning("frontend/dist not found – the SPA won't be served by the backend.")
+
+# History‑fallback: for any unknown path that *isn't* an API route or a file,
+# return index.html so that React‑Router can handle it on the client.
+if frontend_dist.exists():
+    index_file = frontend_dist / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        """
+        Return React's index.html for any route that hasn't been matched
+        by the previous FastAPI endpoints. This allows direct navigation
+        or page refresh on /chat and other SPA routes.
+        """
+        if index_file.exists():
+            return FileResponse(index_file)
+        # If the file is missing (e.g., in dev mode) still raise 404
+        return {"detail": "Not Found"}
 
 # --- Main execution (for local testing without uvicorn command) ---
 if __name__ == "__main__":
