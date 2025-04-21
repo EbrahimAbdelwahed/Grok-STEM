@@ -1,180 +1,239 @@
-# backend/main.py
 
+**`backend/main.py`**
+
+```python
 import os
 import logging
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import uuid
+import asyncio
+from typing import List, Dict, Any
+from pathlib import Path
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+
 from dotenv import load_dotenv
 
-# Import the core processing logic
-from chat_logic import process_user_message  # Fixed relative import
+# Import backend components
+from config import settings
+from chat_logic import process_user_message
+from qdrant_service import check_qdrant_status, close_qdrant_client, qdrant_client
+from llm_clients import check_llm_api_status, close_openai_client, close_grok_client # Assuming close functions exist
+import schemas # Import schemas for error payloads
 
-# --- Configuration & Setup ---
+# --- Configuration & Logging ---
 load_dotenv()
+
+# Ensure log level is valid
+log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+if log_level_str not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
+    log_level_str = "INFO"
+
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=log_level_str,
+    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+# Log loaded settings
+logger.info("--- GrokSTEM Backend Settings ---")
+logger.info(f"  Log Level: {settings.LOG_LEVEL}")
+logger.info(f"  Reasoning Model: {settings.REASONING_MODEL_NAME}")
+logger.info(f"  Plotting Model: {settings.PLOTTING_MODEL_NAME}")
+logger.info(f"  Embedding Model: {settings.EMBEDDING_MODEL_NAME}")
+logger.info(f"  Qdrant URL: {settings.QDRANT_URL}")
+logger.info(f"  RAG Collection: {settings.QDRANT_RAG_COLLECTION}")
+logger.info(f"  Cache Collection: {settings.QDRANT_CACHE_COLLECTION}")
+logger.info(f"  Cache Threshold: {settings.CACHE_THRESHOLD}")
+logger.info(f"  RAG Num Results: {settings.RAG_NUM_RESULTS}")
+logger.info(f"  CORS Origins: {settings.cors_allowed_origins_list}")
+logger.info("---------------------------------")
+
+
+# --- FastAPI App Initialization ---
 app = FastAPI(
-    title="GrokSTEM Chatbot API",
-    description="API for the GrokSTEM interactive learning assistant.",
-    version="0.1.0"
+    title="GrokSTEM Backend API",
+    description="Handles WebSocket connections and processing for the GrokSTEM chatbot.",
+    version="0.2.0"
 )
 
 # --- CORS Middleware ---
-# Use settings from config.py
-from config import settings  # Fixed relative import
-logger.info(f"Configuring CORS for origins: {settings.cors_allowed_origins}")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_allowed_origins,
+    allow_origins=settings.cors_allowed_origins_list, # Use the parsed list
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # --- WebSocket Connection Manager ---
-# Simple in-memory manager (consider Redis/alternatives for scaling)
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: Dict[str, WebSocket] = {} # Store by a unique client ID
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket) -> str:
         await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"WebSocket {websocket.client} connected. Total clients: {len(self.active_connections)}")
+        client_id = uuid.uuid4().hex # Assign a unique ID to each connection
+        self.active_connections[client_id] = websocket
+        logger.info(f"WebSocket connected: {websocket.client.host}:{websocket.client.port} (ID: {client_id}). Total: {len(self.active_connections)}")
+        return client_id
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        logger.info(f"WebSocket {websocket.client} disconnected. Total clients: {len(self.active_connections)}")
+    def disconnect(self, client_id: str):
+        if client_id in self.active_connections:
+            websocket = self.active_connections.pop(client_id)
+            logger.info(f"WebSocket disconnected: {websocket.client.host}:{websocket.client.port} (ID: {client_id}). Total: {len(self.active_connections)}")
+        else:
+            logger.warning(f"Attempted to disconnect non-existent client ID: {client_id}")
 
-    # Optional: async def send_personal_message(self, message: str, websocket: WebSocket): ...
-    # Optional: async def broadcast(self, message: str): ...
+    async def send_personal_json(self, message: dict, client_id: str):
+        if client_id in self.active_connections:
+            websocket = self.active_connections[client_id]
+            try:
+                await websocket.send_json(message)
+            except Exception as e:
+                 logger.error(f"Failed to send JSON to client {client_id}: {e}")
+                 # Optionally disconnect on persistent send errors
+                 # self.disconnect(client_id)
+        else:
+            logger.warning(f"Attempted to send message to non-existent client ID: {client_id}")
 
 manager = ConnectionManager()
 
 # --- API Routes ---
-@app.get("/")
+@app.get("/", tags=["General"])
 async def read_root():
     logger.debug("Root endpoint '/' accessed.")
     return {"message": "GrokSTEM Backend is running"}
 
-@app.get("/health")
+@app.get("/health", tags=["Health"], response_model=Dict[str, Any])
 async def health_check():
-    # Add checks for DB, LLM connectivity if needed
+    """Checks the status of the backend and its dependencies."""
     logger.debug("Health check endpoint '/health' accessed.")
-    return {"status": "ok"}
+    qdrant_status = await check_qdrant_status()
+    llm_status = await check_llm_api_status()
+
+    overall_status = "ok"
+    if qdrant_status.get("qdrant_status") != "ok" or \
+       any(status != "ok" for status in llm_status.values()):
+        overall_status = "error"
+
+    return {
+        "status": overall_status,
+        "dependencies": {
+            "qdrant": qdrant_status,
+            "llms": llm_status
+        }
+    }
 
 # --- WebSocket Endpoint ---
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Handles WebSocket connections and delegates message processing."""
-    await manager.connect(websocket)
+    client_id = await manager.connect(websocket)
     try:
         while True:
-            # Wait for a message from the client
             user_message = await websocket.receive_text()
-            logger.info(f"Received message: '{user_message[:100]}...' from {websocket.client}")
+            logger.info(f"Received message from client {client_id}: '{user_message[:100]}...'")
 
             # --- Call the chat logic processor ---
-            # process_user_message is an async generator
             try:
                 async for response_chunk in process_user_message(user_message, websocket):
-                    await websocket.send_json(response_chunk)
+                    # Ensure chunk is sent only to the requesting client
+                    await manager.send_personal_json(response_chunk, client_id)
             except Exception as processing_error:
                  # Log error from chat_logic if it wasn't caught internally
-                 logger.error(f"Error during message processing for {websocket.client}: {processing_error}", exc_info=True)
-                 # Send a generic error message to the client
-                 error_payload = {
-                     "type": "error",
-                     "content": "An internal error occurred while processing your request.",
-                     "id": "error-" + uuid.uuid4().hex # Give error its own ID
-                 }
-                 await websocket.send_json(error_payload)
-                 # Send an end message to signal completion, even after error
-                 await websocket.send_json({"type": "end", "id": error_payload["id"]})
+                 logger.error(f"Error during message processing for client {client_id}: {processing_error}", exc_info=True)
+                 # Send a structured error message back to the client
+                 error_payload = schemas.ErrorMessage(
+                     id="error-" + uuid.uuid4().hex, # Assign a unique ID to the error message itself
+                     content="An internal error occurred while processing your request. Please check logs or try again later."
+                 ).model_dump()
+                 await manager.send_personal_json(error_payload, client_id)
+                 # Also send an end message to signal completion, even after error
+                 end_payload = schemas.EndMessage(id=error_payload["id"]).model_dump()
+                 await manager.send_personal_json(end_payload, client_id)
             # ---------------------------------------
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket {websocket.client} disconnected cleanly.")
+        logger.info(f"WebSocket client {client_id} disconnected cleanly.")
     except Exception as e:
-        # Catch potential errors during receive_text or unexpected issues
-        logger.error(f"Unexpected WebSocket error for {websocket.client}: {e}", exc_info=True)
+        # Catch potential errors during receive_text or other unexpected issues
+        logger.error(f"Unexpected WebSocket error for client {client_id}: {e}", exc_info=True)
     finally:
         # Ensure disconnection cleanup happens
-        manager.disconnect(websocket)
+        manager.disconnect(client_id)
 
-# --- Optional: Add startup event to ensure Qdrant collections ---
-# from .qdrant_client import ensure_collection_exists, qdrant_client
-# from .rag_utils import RAG_VECTOR_DIM, CACHE_VECTOR_DIM # Need to expose these dims
+# --- Event Handlers for Startup/Shutdown ---
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Application startup...")
+    # Perform initial dependency checks
+    q_status = await check_qdrant_status()
+    l_status = await check_llm_api_status()
+    logger.info(f"Initial Qdrant status: {q_status}")
+    logger.info(f"Initial LLM status: {l_status}")
+    if q_status.get("qdrant_status") != "ok":
+         logger.warning("Qdrant connection check failed on startup.")
+    if any(s != "ok" for s in l_status.values()):
+         logger.warning("One or more LLM API connection checks failed on startup.")
+    # No need to create collections here, handled by data_pipeline scripts
+    logger.info("Startup complete.")
 
-# @app.on_event("startup")
-# async def startup_event():
-#     logger.info("Running startup tasks...")
-#     try:
-#         if qdrant_client:
-#             logger.info("Ensuring Qdrant collections exist...")
-#             # Ensure dimensions are correctly defined/imported in rag_utils.py
-#             ensure_collection_exists(qdrant_client, settings.qdrant_rag_collection, RAG_VECTOR_DIM)
-#             ensure_collection_exists(qdrant_client, settings.qdrant_cache_collection, CACHE_VECTOR_DIM)
-#             logger.info("Qdrant collection check complete.")
-#         else:
-#              logger.warning("Qdrant client not initialized, skipping collection check.")
-#     except Exception as e:
-#         logger.error(f"Error during startup collection check: {e}", exc_info=True)
-#     logger.info("Startup tasks finished.")
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Application shutdown...")
+    # Gracefully close client connections
+    await close_qdrant_client()
+    # Use the functions added to llm_clients.py:
+    await close_openai_client()
+    await close_grok_client()
+    logger.info("Shutdown complete.")
 
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pathlib import Path
 
-# Path to the Vite build output
-frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-if frontend_dist.exists():
-    # Serve all files in /dist at the root URL.
-    # Requesting /assets/* etc. will now work.
-    app.mount(
-        "/",                       # mount at root
-        StaticFiles(directory=str(frontend_dist), html=True),
-        name="frontend"
-    )
-    logger.info(f"Serving React build from {frontend_dist}")
+# --- Static Files Hosting (for Production) ---
+# Serve the React frontend build if it exists
+frontend_dist_str = str(Path(__file__).resolve().parent.parent / "frontend" / "dist")
+frontend_dist_path = Path(frontend_dist_str)
+static_files_app = None
+
+if frontend_dist_path.exists() and (frontend_dist_path / "index.html").exists():
+     logger.info(f"Serving static files from: {frontend_dist_str}")
+     static_files_app = StaticFiles(directory=frontend_dist_str, html=True)
+     app.mount("/assets", StaticFiles(directory=str(frontend_dist_path / "assets")), name="assets") # Explicitly mount assets
+     # Mount at root AFTER API routes are defined
+     app.mount("/", static_files_app, name="frontend")
 else:
-    logger.warning("frontend/dist not found – the SPA won't be served by the backend.")
+     logger.warning(f"Frontend build directory '{frontend_dist_str}' not found or missing index.html. SPA frontend will not be served by the backend.")
 
-# History‑fallback: for any unknown path that *isn't* an API route or a file,
-# return index.html so that React‑Router can handle it on the client.
-if frontend_dist.exists():
-    index_file = frontend_dist / "index.html"
-
+# --- SPA Fallback Route ---
+# This should come AFTER all other API routes and static mounts
+# It ensures that any path not matched by API or static files serves index.html
+if static_files_app: # Only add fallback if static files are being served
     @app.get("/{full_path:path}", include_in_schema=False)
-    async def spa_fallback(full_path: str):
-        """
-        Return React's index.html for any route that hasn't been matched
-        by the previous FastAPI endpoints. This allows direct navigation
-        or page refresh on /chat and other SPA routes.
-        """
-        if index_file.exists():
-            return FileResponse(index_file)
-        # If the file is missing (e.g., in dev mode) still raise 404
-        return {"detail": "Not Found"}
+    async def serve_spa(full_path: str):
+        """Serve index.html for SPA routing."""
+        index_path = frontend_dist_path / "index.html"
+        if index_path.exists():
+            logger.debug(f"SPA fallback triggered for path: /{full_path}. Serving index.html.")
+            return FileResponse(index_path)
+        else:
+            # This case should not happen if the initial check passed, but good practice
+            logger.error("SPA fallback: index.html not found!")
+            raise HTTPException(status_code=404, detail="SPA index.html not found")
+
 
 # --- Main execution (for local testing without uvicorn command) ---
 if __name__ == "__main__":
     import uvicorn
-    # Use log level from settings for direct run too
-    log_config = uvicorn.config.LOGGING_CONFIG
-    log_config["loggers"]["uvicorn"]["level"] = settings.log_level.upper()
-    log_config["loggers"]["uvicorn.access"]["level"] = settings.log_level.upper()
-
-    logger.info(f"Starting Uvicorn server directly on port 8000 with log level {settings.log_level}...")
+    logger.info(f"Starting Uvicorn server directly on port 8000 with log level {settings.LOG_LEVEL}...")
+    # Note: Uvicorn logging config might need adjustment for optimal format with basicConfig
     uvicorn.run(
-        "main:app", # Important: Use string reference for reload to work
+        "main:app", # Use string for reload to work properly
         host="0.0.0.0",
         port=8000,
-        log_config=log_config,
-        reload=True # Enable reload for local dev when run directly
+        log_level=settings.LOG_LEVEL.lower(), # Use lowercase for uvicorn log_level
+        reload=True, # Enable reload for local development
+        reload_dirs=[str(Path(__file__).parent)] # Specify directory to watch for reload
     )

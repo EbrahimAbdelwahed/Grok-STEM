@@ -1,21 +1,22 @@
-// frontend/src/pages/ChatPage.tsx
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
 // Import UI components
 import { Header } from '@/components/custom/Header';
 import { ChatInput } from '@/components/custom/ChatInput';
-import { ChatMessage, ThinkingMessage } from '@/components/custom/ChatMessage';
+import { ChatMessage, ThinkingMessage } from '@/components/custom/ChatMessage'; // Import ThinkingMessage here
 import { Overview } from '@/components/custom/Overview';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'; // Import ScrollArea components
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // For errors
+import { Terminal } from "lucide-react"; // Icon for alert
 
 // Import utilities and types
 import { useScrollToBottom } from '@/hooks/useScrollToBottom';
-import { EnhancedMessage, PlotlyData, ReasoningStep } from '@/interfaces/interfaces'; // Ensure all types are imported
-// import { toast } from 'sonner'; // Import Sonner if using it for notifications
+import { EnhancedMessage, PlotlyData, ReasoningStep } from '@/interfaces/interfaces';
 
 // --- Constants ---
-const WEBSOCKET_URL = import.meta.env.VITE_WEBSOCKET_URL ?? "ws://localhost:8000/ws";
+const WEBSOCKET_URL = import.meta.env.VITE_WEBSOCKET_URL ?? "ws://localhost:8000/ws"; // Default for local dev
+const RECONNECT_DELAY = 5000; // 5 seconds
 
 // Define the expected structure of incoming WebSocket messages
 interface WebSocketMessage {
@@ -36,38 +37,66 @@ export const ChatPage: React.FC = () => {
 
   // --- Refs ---
   const ws = useRef<WebSocket | null>(null);
+  const reconnectTimeoutId = useRef<NodeJS.Timeout | null>(null);
   // Ref to store the ID of the assistant message currently being generated
   const currentAssistantMessageId = useRef<string | null>(null);
-  const [messagesContainerRef, messagesEndRef] = useScrollToBottom<HTMLDivElement>([messages.length]);
+  // UseScrollToBottom hook for the ScrollArea viewport
+  const scrollAreaRef = useRef<HTMLDivElement>(null); // Ref for the ScrollArea viewport
+  const { scrollContainerRef, messagesEndRef, scrollToBottom } = useScrollToBottom<HTMLDivElement>([messages, isLoading]); // Pass isLoading to trigger scroll on its change
+
 
   // --- WebSocket Connection Logic ---
   const connectWebSocket = useCallback(() => {
+    // Clear any existing reconnect timeout
+    if (reconnectTimeoutId.current) {
+      clearTimeout(reconnectTimeoutId.current);
+      reconnectTimeoutId.current = null;
+    }
+
     // Avoid reconnecting if already open or connecting
     if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
       console.log("WebSocket already open or connecting.");
+      setIsConnected(true); // Ensure state reflects reality
       return;
     }
 
     console.log(`Attempting to connect WebSocket to ${WEBSOCKET_URL}...`);
     setCurrentError(null); // Clear previous errors on new connection attempt
+    setIsConnected(false); // Assume not connected initially
     ws.current = new WebSocket(WEBSOCKET_URL);
 
     ws.current.onopen = () => {
       console.log("WebSocket Connected");
       setIsConnected(true);
       setCurrentError(null);
+      if (reconnectTimeoutId.current) { // Clear timeout if connection succeeds
+          clearTimeout(reconnectTimeoutId.current);
+          reconnectTimeoutId.current = null;
+      }
     };
 
     ws.current.onclose = (event) => {
-      console.log("WebSocket Disconnected:", event.reason, event.code);
+      console.log(`WebSocket Disconnected: Code=${event.code}, Reason='${event.reason}', Clean=${event.wasClean}`);
       setIsConnected(false);
-      // Only set error if it was an unexpected close
-      if (!event.wasClean) {
-          setCurrentError("Connection lost. Please try refreshing.");
-          // toast.error("Connection lost. Please try refreshing.");
+      ws.current = null; // Clear the ref
+
+      // Only set error and attempt reconnect if it wasn't a clean close or manual close (code 1000)
+      if (!event.wasClean && event.code !== 1000) {
+        const errorMsg = `Connection lost (Code: ${event.code}). Attempting to reconnect...`;
+        setCurrentError(errorMsg);
+        console.log(errorMsg);
+        // Schedule reconnect attempt
+        if (!reconnectTimeoutId.current) {
+            reconnectTimeoutId.current = setTimeout(connectWebSocket, RECONNECT_DELAY);
+        }
+      } else {
+          // Clean close, maybe user navigated away
+          setCurrentError(null); // Clear any previous errors
       }
+
       // If a message was being processed when connection dropped, stop loading
       if (currentAssistantMessageId.current) {
+        console.warn("Connection closed while message", currentAssistantMessageId.current, "was processing.");
         setIsLoading(false);
         currentAssistantMessageId.current = null;
       }
@@ -75,11 +104,15 @@ export const ChatPage: React.FC = () => {
 
     ws.current.onerror = (error) => {
       console.error("WebSocket Error:", error);
-      setCurrentError("Connection error. Please check the console or refresh.");
-      // toast.error("WebSocket connection error.");
+      // Error likely leads to onclose, which handles reconnect attempt
+      setCurrentError("Connection error occurred.");
       setIsConnected(false);
-      setIsLoading(false);
+      setIsLoading(false); // Stop loading on error
       currentAssistantMessageId.current = null;
+      if (ws.current && ws.current.readyState !== WebSocket.CLOSED) {
+        ws.current.close(); // Attempt to force close to trigger onclose handler
+      }
+      ws.current = null; // Clear ref
     };
 
     // --- Message Handling ---
@@ -88,108 +121,162 @@ export const ChatPage: React.FC = () => {
         const messageData: WebSocketMessage = JSON.parse(event.data);
         const { type, id } = messageData;
 
-        // If this is the first chunk for a new assistant response, record its ID
-        if (currentAssistantMessageId.current === null && id && type !== 'end' && type !== 'error') {
+        // Initial message chunk handling: Create placeholder if needed
+        if (currentAssistantMessageId.current === null && type !== 'end' && type !== 'error') {
+            console.log(`[ID: ${id}] Received first chunk, type: ${type}`);
             currentAssistantMessageId.current = id;
-             // Add a placeholder message structure immediately if it doesn't exist
-             setMessages(prev => {
-                if (prev.some(msg => msg.id === id)) return prev; // Already exists
-                return [...prev, { id, role: 'assistant', text_content: "" }]; // Add placeholder
-             });
+            // Add a new, empty assistant message placeholder
+            setMessages(prev => {
+                 // Check if a message with this ID already exists (e.g., from cache hit followed by error?)
+                if (prev.some(msg => msg.id === id)) {
+                    console.warn(`[ID: ${id}] Message placeholder already exists.`);
+                    return prev;
+                }
+                console.log(`[ID: ${id}] Adding new assistant message placeholder.`);
+                // Add placeholder with role and ID, other fields undefined initially
+                return [...prev, { id, role: 'assistant' }];
+            });
         }
 
-        // Ignore messages not matching the current stream ID (unless it's a new error)
-        if (type !== 'error' && id !== currentAssistantMessageId.current) {
-          console.warn(`Ignoring message with ID ${id}. Current stream ID is ${currentAssistantMessageId.current}`);
-          return;
+        // Handle backend errors specifically
+        if (type === 'error') {
+            console.error(`[ID: ${id}] Backend Error Received:`, messageData.content);
+            const errorId = id || uuidv4(); // Use message ID or generate one
+            const errorMsg = `Backend Error: ${messageData.content || 'Unknown error'}`;
+            setCurrentError(errorMsg);
+            setIsLoading(false);
+
+            // Try to update the placeholder if it exists, otherwise add new error msg
+            setMessages(prev => {
+                 const msgIndex = prev.findIndex(msg => msg.id === errorId && msg.role === 'assistant');
+                 if (msgIndex !== -1) {
+                      const updatedMessages = [...prev];
+                      // Replace placeholder with error content or mark it as error
+                      updatedMessages[msgIndex] = {
+                          ...updatedMessages[msgIndex],
+                          text_content: `Error: ${messageData.content || 'Unknown error'}`, // Show error in chat
+                          isError: true // Add a flag
+                      };
+                      return updatedMessages;
+                 } else {
+                     // If no placeholder, maybe add a generic error message? Or rely on Alert.
+                     // For now, we rely on the Alert banner.
+                     return prev;
+                 }
+            });
+
+            // If the error belongs to the current stream, reset the stream ID
+            if (id === currentAssistantMessageId.current) {
+                currentAssistantMessageId.current = null;
+            }
+            return; // Stop processing this specific error message here
         }
 
-        setMessages((prevMessages) => {
-          const msgIndex = prevMessages.findIndex(msg => msg.id === id);
 
-          if (msgIndex === -1 && type !== 'error') {
-            // This case should ideally be handled by the placeholder logic above,
-            // but acts as a fallback if the first chunk isn't received correctly.
-            console.warn(`Message with ID ${id} not found, creating.`);
-             if(type === 'text') return [...prevMessages, { id, role: 'assistant', text_content: messageData.content || "" }];
-             if(type === 'plot') return [...prevMessages, { id, role: 'assistant', plotly_json: messageData.plotly_json }];
-             if(type === 'steps') return [...prevMessages, { id, role: 'assistant', steps: messageData.steps }];
-             // Don't create new messages for 'end'
-             return prevMessages;
-          }
+        // Ensure message belongs to the current stream being processed
+        if (id !== currentAssistantMessageId.current) {
+            // Exception: Allow 'end' messages even if ID doesn't match (e.g., for cached streams)
+            if (type === 'end') {
+                console.log(`[ID: ${id}] Received end signal for potentially different stream.`);
+                // If an 'end' comes for the *current* stream, handle normally
+                if (id === currentAssistantMessageId.current) {
+                     setIsLoading(false);
+                     currentAssistantMessageId.current = null;
+                }
+                 // Otherwise, just ignore it (could be from a cancelled/old stream)
+                return;
+            }
+            console.warn(`Ignoring message with ID ${id} - does not match current stream ${currentAssistantMessageId.current}`);
+            return;
+        }
 
-          // Update existing message based on type
-          const updatedMessages = [...prevMessages];
-          const currentMsg = updatedMessages[msgIndex];
+        // Update the state immutably
+        setMessages(prevMessages => {
+            // Find the index of the message to update
+            const msgIndex = prevMessages.findIndex(msg => msg.id === id);
 
-          switch (type) {
-            case 'text':
-              updatedMessages[msgIndex] = {
-                ...currentMsg,
-                role: 'assistant', // Ensure role is assistant
-                text_content: (currentMsg?.text_content || "") + (messageData.content || ""),
-              };
-              break;
-            case 'plot':
-              if (messageData.plotly_json) {
-                updatedMessages[msgIndex] = { ...currentMsg, role: 'assistant', plotly_json: messageData.plotly_json };
-              }
-              break;
-            case 'steps':
-              if (messageData.steps) {
-                updatedMessages[msgIndex] = { ...currentMsg, role: 'assistant', steps: messageData.steps };
-              }
-              break;
-            case 'end':
-              // Finalize the stream for this message
-              setIsLoading(false);
-              currentAssistantMessageId.current = null; // Reset for next message
-              // Optionally update a flag on the message itself e.g., message.isComplete = true
-              break;
-            case 'error':
-               // Handle errors sent from backend (could display differently)
-               console.error("Backend Error:", messageData.content);
-               setCurrentError(`Backend Error: ${messageData.content}`);
-               // toast.error(`Backend Error: ${messageData.content}`);
-               setIsLoading(false);
-               currentAssistantMessageId.current = null;
-               // Add a new distinct error message to the chat?
-               // return [...prevMessages, {id: messageData.id || uuidv4(), role: 'assistant', text_content: `Error: ${messageData.content}` }];
-               break; // Keep existing messages, error shown separately
-            default:
-              console.warn("Received unknown message type:", messageData);
-          }
-          return updatedMessages;
+            if (msgIndex === -1) {
+                // Should not happen if placeholder logic works, but log if it does
+                console.error(`[ID: ${id}] Cannot find message to update.`);
+                return prevMessages;
+            }
+
+            const updatedMessages = [...prevMessages];
+            let currentMsg = { ...updatedMessages[msgIndex] }; // Create a copy to modify
+
+            // Process based on message type
+            switch (type) {
+                case 'text':
+                    currentMsg.text_content = (currentMsg.text_content || "") + (messageData.content || "");
+                    console.debug(`[ID: ${id}] Appended text chunk. New length: ${currentMsg.text_content?.length}`);
+                    break;
+                case 'plot':
+                    if (messageData.plotly_json) {
+                        currentMsg.plotly_json = messageData.plotly_json;
+                        console.log(`[ID: ${id}] Added plot data.`);
+                    }
+                    break;
+                case 'steps':
+                    if (messageData.steps) {
+                        currentMsg.steps = messageData.steps;
+                        console.log(`[ID: ${id}] Added ${messageData.steps.length} steps.`);
+                    }
+                    break;
+                case 'end':
+                    console.log(`[ID: ${id}] Received end stream signal.`);
+                    setIsLoading(false); // Stop loading indicator
+                    currentAssistantMessageId.current = null; // Reset for next message
+                    // No state change needed for 'end' itself, just resets loading/stream ID
+                    return prevMessages; // Return current state
+                default:
+                    console.warn(`[ID: ${id}] Received unknown message type:`, type);
+                    return prevMessages; // Return current state
+            }
+
+            // Put the updated message back into the array
+            updatedMessages[msgIndex] = currentMsg;
+            return updatedMessages;
         });
 
       } catch (error) {
         console.error("Failed to parse WebSocket message or update state:", event.data, error);
-        // Handle non-JSON messages or other errors if needed
-        // setIsLoading(false); // Consider stopping loading on parse errors?
-        // setCurrentError("Received invalid message format from server.");
+        setCurrentError("Received invalid message format from server.");
+        // Consider stopping loading if parse fails mid-stream?
+        // setIsLoading(false);
+        // currentAssistantMessageId.current = null;
       }
     };
-  }, []); // Empty dependency array ensures this runs once on mount
+  }, []); // connectWebSocket has no dependencies, runs once
 
   // --- Effects ---
   useEffect(() => {
-    connectWebSocket();
-    return () => { ws.current?.close(); };
-  }, [connectWebSocket]);
+    connectWebSocket(); // Initial connection attempt
+    // Cleanup function to close WebSocket and clear timeout on component unmount
+    return () => {
+      console.log("ChatPage unmounting. Closing WebSocket.");
+      if (reconnectTimeoutId.current) {
+        clearTimeout(reconnectTimeoutId.current);
+      }
+      ws.current?.close(1000, "Component unmounting"); // Code 1000 for normal closure
+      ws.current = null;
+    };
+  }, [connectWebSocket]); // Re-run effect only if connectWebSocket identity changes (it shouldn't)
+
 
   // --- Event Handlers ---
   const handleSubmit = useCallback(async (messageToSend?: string) => {
-    const text = (messageToSend ?? input).trim(); // Use passed text or state
+    const text = (messageToSend ?? input).trim();
     if (!text) return;
+
     if (!isConnected || !ws.current || ws.current.readyState !== WebSocket.OPEN) {
-      console.error("WebSocket is not connected.");
+      console.error("WebSocket is not connected. Cannot send message.");
       setCurrentError("Not connected. Please wait or refresh.");
-      // toast.error("Not connected. Please wait or refresh.");
+      // Optionally try to reconnect immediately
+      // connectWebSocket();
       return;
     }
     if (isLoading) {
       console.warn("Submission attempt while loading blocked.");
-      // toast.warning("Please wait for the current response to finish.");
       return;
     }
 
@@ -200,69 +287,81 @@ export const ChatPage: React.FC = () => {
       text_content: text,
     };
 
-    // Add user message and set loading *before* sending
+    // Add user message and immediately set loading
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
     setInput("");
     setCurrentError(null); // Clear previous errors on new submission
+    scrollToBottom(); // Scroll after adding user message
 
     // Send message via WebSocket
+    console.log(`Sending message: ${text.substring(0, 50)}...`);
     ws.current.send(text);
 
-  }, [input, isLoading, isConnected, connectWebSocket]); // Add connectWebSocket if using reconnect logic
+  }, [input, isLoading, isConnected, scrollToBottom]); // Add scrollToBottom dependency
 
-  // Function to scroll to a specific step
+
+  // --- Scrolling ---
   const scrollToStep = useCallback((stepId: string) => {
     const element = document.getElementById(stepId);
-    if (element) {
-       // Add slight offset from top if header is sticky
-      const headerOffset = 80; // Adjust based on your header height
-      const elementPosition = element.getBoundingClientRect().top;
-      const offsetPosition = elementPosition + window.scrollY - headerOffset;
+    const scrollContainer = scrollContainerRef.current; // Use the ref from the hook
 
-      window.scrollTo({
-          top: offsetPosition,
-          behavior: "smooth"
-      });
-      // Simple version: element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (element && scrollContainer) {
+        const containerTop = scrollContainer.getBoundingClientRect().top;
+        const elementTop = element.getBoundingClientRect().top;
+        const headerOffset = 80; // Adjust as needed for sticky header height
+        const currentScrollTop = scrollContainer.scrollTop;
+
+        const scrollToPosition = currentScrollTop + (elementTop - containerTop) - headerOffset;
+
+        scrollContainer.scrollTo({
+            top: scrollToPosition,
+            behavior: 'smooth'
+        });
+        console.log(`Scrolling to step ${stepId} at position ${scrollToPosition}`);
     } else {
-      console.warn(`Element with ID ${stepId} not found for scrolling.`);
+        console.warn(`Element with ID ${stepId} or scroll container not found for scrolling.`);
     }
-  }, []);
-
+  }, [scrollContainerRef]); // Dependency on container ref from hook
 
   // --- Render ---
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="flex flex-col h-screen bg-background overflow-hidden"> {/* Prevent body scroll */}
       <Header />
 
-      {/* Optional: Display connection error */}
+      {/* Error Alert */}
       {currentError && (
-        <div className="bg-destructive text-destructive-foreground p-2 text-center text-sm">
-          {currentError}
-        </div>
+         <Alert variant="destructive" className="m-2 rounded-md shrink-0"> {/* Add shrink-0 */}
+             <Terminal className="h-4 w-4" />
+             <AlertTitle>Connection Issue</AlertTitle>
+             <AlertDescription>{currentError}</AlertDescription>
+         </Alert>
       )}
 
-      <div
-        className="flex-1 overflow-y-auto p-4 space-y-6" // Increased space-y
-        ref={messagesContainerRef}
-      >
-        {messages.length === 0 && !isLoading && <Overview />}
-        {messages.map((msg) => (
-          <ChatMessage key={msg.id} message={msg} scrollToStep={scrollToStep} />
-        ))}
-        {isLoading && <ThinkingMessage />}
-        <div ref={messagesEndRef} className="h-1" />
-      </div>
+      {/* Use ScrollArea for the main chat content */}
+      {/* Assign the ref from useScrollToBottom to the ScrollArea's viewport */}
+      <ScrollArea className="flex-1" viewportRef={scrollContainerRef}>
+          <div className="p-4 space-y-6 max-w-4xl mx-auto"> {/* Add max-width and center */}
+            {messages.length === 0 && !isLoading && <Overview />}
+            {messages.map((msg) => (
+              <ChatMessage key={msg.id} message={msg} scrollToStep={scrollToStep} />
+            ))}
+            {isLoading && <ThinkingMessage />}
+            {/* Invisible div to target for scrolling to bottom */}
+            <div ref={messagesEndRef} className="h-1" />
+          </div>
+          <ScrollBar orientation="vertical" />
+      </ScrollArea>
 
-      <div className="p-4 border-t bg-background">
+      {/* Input area sticky at the bottom */}
+      <div className="p-4 border-t bg-background shrink-0"> {/* Add shrink-0 */}
         <div className="max-w-3xl mx-auto">
           <ChatInput
-            input={input} // Pass state
-            setInput={setInput} // Pass setter
+            input={input}
+            setInput={setInput}
             onSubmit={handleSubmit}
             isLoading={isLoading}
-            isConnected={isConnected} // Pass connection status
+            isConnected={isConnected}
           />
         </div>
       </div>

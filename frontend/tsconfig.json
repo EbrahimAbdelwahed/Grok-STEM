@@ -1,16 +1,36 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] },
-    "jsx": "react-jsx",
-    "module": "esnext",                // <-- allow import.meta
-    "target": "es2022",        // <-- enable JSX support
-    "esModuleInterop": true,                // <-- allow default-imports from export= modules
+    "target": "ESNext", // Use latest target
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler", // Or "node" if preferred
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx", // Correct JSX setting
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node", "vite/client"]  // Add this to resolve the missing type definitions
+
+    /* Path Aliases */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    /* Types */
+    "types": ["vite/client", "node"] // Ensure 'node' is included for polyfills/path
   },
-  "include": [
-    "src",
-    "node_modules/@types"
-  ]
+  "include": ["src"], // Include only 'src'
+  "references": [{ "path": "./tsconfig.node.json" }] // Optional: If using separate node config
 }

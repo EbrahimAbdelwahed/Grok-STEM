@@ -17,6 +17,7 @@ class TextChunk(WebSocketMessageBase):
 class PlotData(WebSocketMessageBase):
     """Message containing Plotly JSON data."""
     type: Literal['plot'] = "plot"
+    # Use Dict[str, Any] for flexibility, or define more specific Plotly types if needed
     plotly_json: Dict[str, Any] = Field(..., description="Plotly JSON object (data and layout)")
 
 class StepInfo(BaseModel):
@@ -41,32 +42,26 @@ class ErrorMessage(WebSocketMessageBase):
 # --- Request/Response Models (for potential future HTTP routes) ---
 
 class HealthResponse(BaseModel):
-    status: Literal['ok'] = "ok"
-
-# Example for a potential future HTTP chat endpoint
-class ChatRequest(BaseModel):
-    message: str
-    user_id: Optional[str] = None # Optional user identifier
-    reasoning_effort: Optional[Literal['low', 'medium', 'high']] = 'medium' # Example
-
-class ChatResponse(BaseModel):
-    response_id: str
-    reply: str
-    # Add other fields if needed for HTTP responses
+    """Response model for the /health endpoint."""
+    status: Literal['ok', 'error']
+    dependencies: Dict[str, Any] # Contains status of Qdrant, LLMs, etc.
 
 # --- Data Models for RAG/Cache ---
 
-class RAGDocument(BaseModel):
-    """Represents a document stored for RAG."""
-    id: str # Or UUID
+class RAGDocumentPayload(BaseModel):
+    """Payload structure for points in the RAG collection."""
     text_content: str
-    metadata: Dict[str, Any] = {} # e.g., {"source": "...", "domain": "Physics"}
+    metadata: Dict[str, Any] = Field(default_factory=dict) # e.g., {"source": "...", "domain": "Physics"}
 
-class SemanticCacheItem(BaseModel):
-    """Represents an item in the semantic cache."""
-    id: str # Or UUID
-    question_embedding: Optional[List[float]] = None # Embedding stored separately usually
+class SemanticCachePayload(BaseModel):
+    """Payload structure for points in the semantic cache collection."""
     question_text: str
-    # Store the full structured response that was sent
-    response_data: List[Dict[str, Any]] # List of serialized WebSocket messages
-    metadata: Dict[str, Any] = {}
+    # Store the full structured response that was sent as a list of dicts
+    response_data: List[Dict[str, Any]]
+    metadata: Dict[str, Any] = Field(default_factory=dict) # e.g., {"cached_at": "...", "query_count": 1}
+
+# Example model for a document to be ingested (could be used in data pipeline)
+class DocumentToIngest(BaseModel):
+     id: str
+     text_content: str
+     metadata: Dict[str, Any] = Field(default_factory=dict)

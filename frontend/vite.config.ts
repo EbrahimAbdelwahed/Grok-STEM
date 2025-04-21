@@ -1,5 +1,3 @@
-// frontend/vite.config.ts
-
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path' // Import the 'path' module for resolving paths
@@ -16,50 +14,64 @@ export default defineConfig({
     host: true,
     // Port matching docker-compose.yml and EXPOSE in Dockerfile
     port: 5173,
-    allowedHosts: ['5724-34-17-20-53.ngrok-free.app'], // Added allowed host
-    // Optional: Enable polling for file changes if HMR isn't working reliably in Docker
+    // If HMR isn't working reliably in Docker, enable polling
     watch: {
-      usePolling: true,
-      interval: 1000 // Check for changes every second
+      usePolling: true, // Set to true if needed, otherwise false might be faster
+      interval: 1000 // Check for changes every second if polling is enabled
     },
-    // Add SPA fallback
-    fs: {
-      strict: true,
-    },
-    // Add WebSocket proxy configuration
+    // WebSocket proxy for development
     proxy: {
       '/ws': {
+        // Target the backend service name and port defined in docker-compose
         target: 'ws://backend:8000',
-        ws: true,
-        changeOrigin: true
+        ws: true, // Enable WebSocket proxying
+        changeOrigin: true, // Recommended for virtual hosted sites
+        // Optional: Secure WebSocket (wss) if backend uses TLS
+        // secure: false,
+        // Optional: Log proxy requests
+        // logLevel: 'debug',
       }
     }
   },
+  // Preview server config (used after building)
   preview: {
-    port: 5173
+    port: 5173, // Match the development port or choose another
+    host: true, // Allow external access to preview
   },
-  // Add base path and rewrite rules
-  base: '/',
   resolve: {
     alias: {
       // Setup '@' alias to point to the 'src' directory
       '@': path.resolve(__dirname, './src'),
-      // Alias the `buffer/` import to the browser-compatible buffer package
-      buffer: 'buffer'
+      // Explicitly alias buffer for browser compatibility
+      'buffer': 'buffer/', // Ensure trailing slash matches polyfill expectations
     },
   },
   // Optimize dependencies and add Node.js polyfills for browser compatibility
   optimizeDeps: {
+    // Optimize Plotly dependencies
     include: ['react-plotly.js', 'plotly.js'],
     esbuildOptions: {
       // Define global to globalThis so polyfills can hook properly
       define: {
         global: 'globalThis'
       },
+      // Add esbuild plugins for polyfills
       plugins: [
-        NodeGlobalsPolyfillPlugin({ buffer: true }),
-        NodeModulesPolyfillPlugin()
+        NodeGlobalsPolyfillPlugin({
+            process: true, // Polyfill process if needed by dependencies
+            buffer: true,  // Polyfill Buffer
+        }),
+        NodeModulesPolyfillPlugin() // Polyfills Node.js core modules
       ]
     }
+  },
+   build: {
+    rollupOptions: {
+      plugins: [
+        // NodeModulesPolyfillPlugin() // Also add polyfill plugin for build if needed
+      ],
+    },
+    // Optional: Increase chunk size warning limit if needed
+    // chunkSizeWarningLimit: 1000,
   }
 })

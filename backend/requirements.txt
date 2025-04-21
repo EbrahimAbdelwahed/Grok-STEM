@@ -1,32 +1,33 @@
 # backend/requirements.txt
 
 # Core ASGI Framework & Server
-fastapi>=0.110.0,<0.112.0 # Using a specific minor range for stability
-uvicorn[standard]>=0.29.0,<0.31.0 # Includes standard dependencies like websockets
+fastapi>=0.111.0,<0.112.0 # Updated minor range
+uvicorn[standard]>=0.29.0,<0.31.0
 
-# Data Validation
-pydantic>=2.6.0,<3.0.0
-pydantic-settings>=2.1.0,<3.0.0  # For configuration management
+# Data Validation & Settings
+pydantic>=2.7.0,<3.0.0
+pydantic-settings>=2.2.0,<3.0.0 # Updated minor range
 
 # LLM & AI SDKs
-openai>=1.14.0,<2.0.0      # For interacting with Grok (via custom base_url) & GPT-4o-mini
-# langchain>=0.1.0,<0.3.0   # Add if we decide to use Langchain heavily later
-# langchain-openai>=0.1.0,<0.3.0 # Add if using Langchain with OpenAI SDK based models
+openai>=1.16.0,<2.0.0 # Updated minor range
 
 # Vector Database Client
-qdrant-client>=1.7.0,<1.10.0
+qdrant-client[fastavro]>=1.8.0,<1.10.0 # Updated minor range, added fastavro extra
 
 # Environment Variable Management
 python-dotenv>=1.0.0,<2.0.0
 
-# WebSocket support directly within FastAPI/Uvicorn
-websockets>=12.0,<13.0
+# WebSocket support (provided by uvicorn[standard])
+# websockets>=12.0,<13.0 # Usually not needed explicitly if using uvicorn[standard]
 
-# Optional: For potential async operations if not using Langchain's async features
-# httpx>=0.27.0,<0.28.0
+# Async HTTP client (useful for health checks)
+httpx>=0.27.0,<0.28.0
 
-# Placeholder for potential future RAG libraries (e.g., if not using Langchain's versions)
- sentence-transformers>=2.0.0
- datasets>=2.0.0 # If loading datasets directly
+# Embedding Models
+sentence-transformers>=2.6.0 # Updated version
 
-hf_xet>=0.1.0,<0.2.0 # For Hugging Face model management
+# Optional: For data ingestion from Hugging Face datasets
+# datasets>=2.18.0
+
+# UUID generation (built-in in Python 3)
+# uuid # No need to list built-in modules

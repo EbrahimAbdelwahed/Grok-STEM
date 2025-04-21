@@ -1,4 +1,3 @@
-
 # docker-compose.yml
 version: '3.8' # Specifies the Docker Compose file format version
 
@@ -15,6 +14,12 @@ services:
     networks:
       - grok_stem_network # Connect to the custom network
     restart: unless-stopped # Restart policy
+    # Optional: Add healthcheck for Qdrant if needed
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
 
   # Backend Service (FastAPI)
   backend:
@@ -31,7 +36,8 @@ services:
     networks:
       - grok_stem_network
     depends_on: # Ensure Qdrant starts before the backend
-      - qdrant
+       qdrant:
+         condition: service_started # Or service_healthy if healthcheck is added
     restart: unless-stopped
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload # Command to run FastAPI with hot-reloading
 
@@ -52,7 +58,11 @@ services:
       - backend
     restart: unless-stopped
     environment:
-      - WATCHPACK_POLLING=true # Helps with detecting file changes within Docker volumes on some systems
+      # Helps with detecting file changes within Docker volumes on some systems
+      # VITE_HMR uses WebSocket, WATCHPACK is for polling fallback
+      - CHOKIDAR_USEPOLLING=true # Alternative polling method if watchpack fails
+      - WATCHPACK_POLLING=true
+      - VITE_WEBSOCKET_URL=ws://localhost:8000/ws # Example, but proxy is usually preferred for dev
 
 # Named volume for Qdrant data persistence
 volumes:

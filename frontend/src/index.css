@@ -5,6 +5,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import KaTeX CSS for math rendering */
+@import 'katex/dist/katex.min.css';
+
 /* 2. Define CSS variables for theming (light and dark modes) */
 @layer base {
   /* Light theme (default) */
@@ -38,6 +41,9 @@
     --ring: 262.1 83.3% 57.8%; /* Purple (for focus rings) */
 
     --radius: 0.5rem; /* Default border radius */
+
+    /* Custom GrokSTEM Color */
+    --grokstem: 262.1 83.3% 57.8%;
   }
 
   /* Dark theme */
@@ -71,18 +77,22 @@
     --ring: 263.4 70% 50.4%; /* Brighter Purple */
 
     --radius: 0.5rem;
+
+    /* Custom GrokSTEM Color */
+    --grokstem: 263.4 70% 50.4%;
   }
 }
 
 /* 3. Apply base styles and import fonts */
 @layer base {
   /* Import a font - Example using Google Fonts (Inter) */
-  /* You might host fonts locally or use another provider */
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
   * {
     /* Apply border color variable globally */
     @apply border-border;
+    /* Smooth scrolling behavior */
+    scroll-behavior: smooth;
   }
   body {
     /* Apply background/foreground colors and default font */
@@ -100,17 +110,34 @@
       content: none; /* Remove default backticks from inline code in prose */
   }
    .prose a {
-    @apply text-primary hover:text-primary/80; /* Consistent link color */
+    @apply text-primary hover:text-primary/80 transition-colors; /* Consistent link color */
+   }
+   /* Ensure KaTeX math respects theme colors */
+   .katex {
+    @apply text-foreground; /* Apply default text color to math */
    }
 }
 
-/* Hide scrollbar */
+/* Hide scrollbar for a cleaner look - apply carefully */
+/* Consider only hiding for specific elements if needed */
+
 /* For Chrome, Safari and Opera */
 ::-webkit-scrollbar {
-  display: none;
+  width: 6px; /* Make scrollbar thinner */
+  height: 6px;
 }
-/* For IE, Edge and Firefox */
+::-webkit-scrollbar-track {
+  @apply bg-transparent; /* Transparent track */
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded-full; /* Use border color for thumb */
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-muted-foreground/50; /* Slightly darker on hover */
+}
+
+/* For Firefox */
 * {
-  -ms-overflow-style: none;  /* IE and Edge */
-  scrollbar-width: none;  /* Firefox */
+  scrollbar-width: thin; /* "auto" or "thin" */
+  scrollbar-color: hsl(var(--border)) hsl(var(--background)); /* thumb and track color */
 }
