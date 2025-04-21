@@ -19,6 +19,7 @@ COPY package.json package-lock.json* ./
 RUN npm install
 # If using yarn:
 # RUN yarn install --frozen-lockfile
+RUN npm install --save-dev @types/node
 
 # 5. Copy the rest of the application code
 COPY . .

@@ -16,6 +16,7 @@ export default defineConfig({
     host: '0.0.0.0',
     // Port matching docker-compose.yml and EXPOSE in Dockerfile
     port: 5173,
+    allowedHosts: ['24da-34-17-20-53.ngrok-free.app'], // Added allowed host
     // Optional: Enable polling for file changes if HMR isn't working reliably in Docker
     watch: {
       usePolling: true,

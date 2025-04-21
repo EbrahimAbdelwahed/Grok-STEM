@@ -1,16 +1,12 @@
-
 {
   "compilerOptions": {
     // …your existing options…
     "jsx": "react-jsx",
     "module": "esnext",                // <-- allow import.meta
     "target": "es2022",        // <-- enable JSX support
-    "types": [
-      "node",
-      "vite/client"
-    ],
     "esModuleInterop": true,                // <-- allow default-imports from export= modules
-    "allowSyntheticDefaultImports": true  
+    "allowSyntheticDefaultImports": true,
+    "types": ["node", "vite/client"]  // Add this to resolve the missing type definitions
   },
   "include": [
     "src",
