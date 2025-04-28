@@ -10,6 +10,7 @@ from httpx import ConnectError # For handling embedding model download errors
 from qdrant_service import qdrant_client
 from config import settings
 from schemas import SemanticCachePayload # Corrected import (payload is dict, model defines structure)
+from backend.observability import trace  # Ensure import is available
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ async def search_rag_kb(query: str) -> List[str]:
         return []
 
 # --- Semantic Cache ---
+@trace("semantic_cache_search")  # NEW
 async def search_semantic_cache(query: str) -> Optional[List[Dict[str, Any]]]:
     """
     Searches the semantic cache collection in Qdrant.

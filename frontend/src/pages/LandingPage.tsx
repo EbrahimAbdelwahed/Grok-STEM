@@ -9,7 +9,8 @@ export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
 
   const handleStartChat = () => {
-    navigate('/chat'); // Navigate to the chat page route
+    console.debug("LandingPage: Start Chat button clicked.");  // NEW
+    navigate('/chat');
   };
 
   return (

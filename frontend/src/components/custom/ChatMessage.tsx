@@ -32,6 +32,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, scrollToStep 
     return null;
   }
 
+  console.debug("Rendering ChatMessage:", message);  // NEW
+
   return (
     <motion.div
       className={cn(

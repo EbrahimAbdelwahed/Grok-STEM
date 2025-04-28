@@ -1,7 +1,3 @@
-
-**`backend/main.py`**
-
-```python
 import os
 import logging
 import uuid
@@ -22,6 +18,7 @@ from chat_logic import process_user_message
 from qdrant_service import check_qdrant_status, close_qdrant_client, qdrant_client
 from llm_clients import check_llm_api_status, close_openai_client, close_grok_client # Assuming close functions exist
 import schemas # Import schemas for error payloads
+from backend.observability import trace  # NEW
 
 # --- Configuration & Logging ---
 load_dotenv()
@@ -58,6 +55,10 @@ app = FastAPI(
     description="Handles WebSocket connections and processing for the GrokSTEM chatbot.",
     version="0.2.0"
 )
+
+# --- Middleware for Request Tracing ---
+from backend.observability.tracing_middleware import tracing_middleware
+app.middleware("http")(tracing_middleware)
 
 # --- CORS Middleware ---
 app.add_middleware(
@@ -107,27 +108,22 @@ async def read_root():
     logger.debug("Root endpoint '/' accessed.")
     return {"message": "GrokSTEM Backend is running"}
 
+@trace("health_check")  # NEW
 @app.get("/health", tags=["Health"], response_model=Dict[str, Any])
 async def health_check():
     """Checks the status of the backend and its dependencies."""
     logger.debug("Health check endpoint '/health' accessed.")
     qdrant_status = await check_qdrant_status()
     llm_status = await check_llm_api_status()
-
     overall_status = "ok"
-    if qdrant_status.get("qdrant_status") != "ok" or \
-       any(status != "ok" for status in llm_status.values()):
+    if qdrant_status.get("qdrant_status") != "ok" or any(status != "ok" for status in llm_status.values()):
         overall_status = "error"
-
     return {
         "status": overall_status,
-        "dependencies": {
-            "qdrant": qdrant_status,
-            "llms": llm_status
-        }
+        "dependencies": {"qdrant": qdrant_status, "llms": llm_status}
     }
 
-# --- WebSocket Endpoint ---
+@trace("websocket_endpoint")  # NEW
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Handles WebSocket connections and delegates message processing."""
@@ -136,33 +132,23 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             user_message = await websocket.receive_text()
             logger.info(f"Received message from client {client_id}: '{user_message[:100]}...'")
-
-            # --- Call the chat logic processor ---
             try:
                 async for response_chunk in process_user_message(user_message, websocket):
-                    # Ensure chunk is sent only to the requesting client
                     await manager.send_personal_json(response_chunk, client_id)
             except Exception as processing_error:
-                 # Log error from chat_logic if it wasn't caught internally
-                 logger.error(f"Error during message processing for client {client_id}: {processing_error}", exc_info=True)
-                 # Send a structured error message back to the client
-                 error_payload = schemas.ErrorMessage(
-                     id="error-" + uuid.uuid4().hex, # Assign a unique ID to the error message itself
-                     content="An internal error occurred while processing your request. Please check logs or try again later."
-                 ).model_dump()
-                 await manager.send_personal_json(error_payload, client_id)
-                 # Also send an end message to signal completion, even after error
-                 end_payload = schemas.EndMessage(id=error_payload["id"]).model_dump()
-                 await manager.send_personal_json(end_payload, client_id)
-            # ---------------------------------------
-
+                logger.error(f"Error during message processing for client {client_id}: {processing_error}", exc_info=True)
+                error_payload = schemas.ErrorMessage(
+                    id="error-" + uuid.uuid4().hex,
+                    content="An internal error occurred while processing your request. Please check logs or try again later."
+                ).model_dump()
+                await manager.send_personal_json(error_payload, client_id)
+                end_payload = schemas.EndMessage(id=error_payload["id"]).model_dump()
+                await manager.send_personal_json(end_payload, client_id)
     except WebSocketDisconnect:
         logger.info(f"WebSocket client {client_id} disconnected cleanly.")
     except Exception as e:
-        # Catch potential errors during receive_text or other unexpected issues
         logger.error(f"Unexpected WebSocket error for client {client_id}: {e}", exc_info=True)
     finally:
-        # Ensure disconnection cleanup happens
         manager.disconnect(client_id)
 
 # --- Event Handlers for Startup/Shutdown ---

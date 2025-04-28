@@ -4,6 +4,7 @@ from qdrant_client.http.models import Distance, VectorParams, CollectionStatus
 from qdrant_client.http import exceptions as qdrant_exceptions
 from config import settings
 from typing import Optional
+from backend.observability.http_logging import get_async_http_client  # NEW
 
 logger = logging.getLogger(__name__)
 
@@ -11,15 +12,13 @@ logger = logging.getLogger(__name__)
 qdrant_client: Optional[AsyncQdrantClient] = None
 try:
     logger.info(f"Initializing Async Qdrant client for URL: {settings.QDRANT_URL}")
-    # Use AsyncQdrantClient for FastAPI
     qdrant_client = AsyncQdrantClient(
-        url=settings.QDRANT_URL,
-        api_key=settings.QDRANT_API_KEY or None, # Pass API key if provided
-        timeout=60 # Increase default timeout slightly
+         url=settings.QDRANT_URL,
+         api_key=settings.QDRANT_API_KEY or None,
+         timeout=60,
+         http_client=get_async_http_client(timeout=60)  # NEW
     )
     logger.info("Async Qdrant client initialized successfully.")
-    # Optional: Perform a quick connection test on initialization
-    # asyncio.run(qdrant_client.health_check()) # Requires running in async context or using sync client here
 except Exception as e:
     logger.error(f"Failed to initialize Async Qdrant client: {e}", exc_info=True)
     qdrant_client = None # Explicitly set to None on failure
@@ -67,6 +66,7 @@ async def ensure_collection_exists(
         logger.error(f"Unexpected error checking/creating collection '{collection_name}': {e}", exc_info=True)
         return False
 
+@trace("qdrant_status")  # NEW
 async def check_qdrant_status() -> dict:
     """
     Performs a basic health check on the Qdrant connection.
@@ -81,9 +81,9 @@ async def check_qdrant_status() -> dict:
         # Log found collections for debugging
         # logger.debug(f"Qdrant health check successful. Found collections: {[c.name for c in collections_response.collections]}")
         return {"qdrant_status": "ok", "collections_count": len(collections_response.collections)}
-    except qdrant_exceptions.QdrantException as qe:
-        logger.error(f"Qdrant API error during health check: {qe}", exc_info=False)
-        return {"qdrant_status": "api_error", "detail": str(qe)}
+    except qdrant_exceptions.UnexpectedResponse as ue:
+        logger.error(f"Qdrant API error during health check: {ue}", exc_info=False)
+        return {"qdrant_status": "api_error", "detail": str(ue)}
     except Exception as e:
         logger.error(f"Qdrant connection error during health check: {e}", exc_info=False)
         return {"qdrant_status": "connection_error", "detail": str(e)}

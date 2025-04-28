@@ -32,5 +32,5 @@
     "types": ["vite/client", "node"] // Ensure 'node' is included for polyfills/path
   },
   "include": ["src"], // Include only 'src'
-  "references": [{ "path": "./tsconfig.node.json" }] // Optional: If using separate node config
+  //"references": [{ "path": "./tsconfig.node.json" }] // Optional: If using separate node config
 }

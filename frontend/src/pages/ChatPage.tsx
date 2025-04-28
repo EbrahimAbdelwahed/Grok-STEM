@@ -66,185 +66,176 @@ export const ChatPage: React.FC = () => {
     ws.current = new WebSocket(WEBSOCKET_URL);
 
     ws.current.onopen = () => {
-      console.log("WebSocket Connected");
-      setIsConnected(true);
-      setCurrentError(null);
-      if (reconnectTimeoutId.current) { // Clear timeout if connection succeeds
-          clearTimeout(reconnectTimeoutId.current);
-          reconnectTimeoutId.current = null;
-      }
+        console.debug("WebSocket connected.");
+        setIsConnected(true);
+        setCurrentError(null);
+        if (reconnectTimeoutId.current) { // Clear timeout if connection succeeds
+            clearTimeout(reconnectTimeoutId.current);
+            reconnectTimeoutId.current = null;
+        }
     };
 
     ws.current.onclose = (event) => {
-      console.log(`WebSocket Disconnected: Code=${event.code}, Reason='${event.reason}', Clean=${event.wasClean}`);
-      setIsConnected(false);
-      ws.current = null; // Clear the ref
+        console.debug(`WebSocket closed: Code=${event.code}, reason=${event.reason}`);
+        setIsConnected(false);
+        ws.current = null; // Clear the ref
 
-      // Only set error and attempt reconnect if it wasn't a clean close or manual close (code 1000)
-      if (!event.wasClean && event.code !== 1000) {
-        const errorMsg = `Connection lost (Code: ${event.code}). Attempting to reconnect...`;
-        setCurrentError(errorMsg);
-        console.log(errorMsg);
-        // Schedule reconnect attempt
-        if (!reconnectTimeoutId.current) {
-            reconnectTimeoutId.current = setTimeout(connectWebSocket, RECONNECT_DELAY);
+        // Only set error and attempt reconnect if it wasn't a clean close or manual close (code 1000)
+        if (!event.wasClean && event.code !== 1000) {
+          const errorMsg = `Connection lost (Code: ${event.code}). Attempting to reconnect...`;
+          setCurrentError(errorMsg);
+          console.log(errorMsg);
+          // Schedule reconnect attempt
+          if (!reconnectTimeoutId.current) {
+              reconnectTimeoutId.current = setTimeout(connectWebSocket, RECONNECT_DELAY);
+          }
+        } else {
+            // Clean close, maybe user navigated away
+            setCurrentError(null); // Clear any previous errors
         }
-      } else {
-          // Clean close, maybe user navigated away
-          setCurrentError(null); // Clear any previous errors
-      }
 
-      // If a message was being processed when connection dropped, stop loading
-      if (currentAssistantMessageId.current) {
-        console.warn("Connection closed while message", currentAssistantMessageId.current, "was processing.");
-        setIsLoading(false);
-        currentAssistantMessageId.current = null;
-      }
+        // If a message was being processed when connection dropped, stop loading
+        if (currentAssistantMessageId.current) {
+          console.warn("Connection closed while message", currentAssistantMessageId.current, "was processing.");
+          setIsLoading(false);
+          currentAssistantMessageId.current = null;
+        }
     };
 
     ws.current.onerror = (error) => {
-      console.error("WebSocket Error:", error);
-      // Error likely leads to onclose, which handles reconnect attempt
-      setCurrentError("Connection error occurred.");
-      setIsConnected(false);
-      setIsLoading(false); // Stop loading on error
-      currentAssistantMessageId.current = null;
-      if (ws.current && ws.current.readyState !== WebSocket.CLOSED) {
-        ws.current.close(); // Attempt to force close to trigger onclose handler
-      }
-      ws.current = null; // Clear ref
+        console.error("WebSocket encountered error:", error);
+        setCurrentError("Connection error occurred.");
+        setIsConnected(false);
+        setIsLoading(false); // Stop loading on error
+        currentAssistantMessageId.current = null;
+        if (ws.current && ws.current.readyState !== WebSocket.CLOSED) {
+          ws.current.close(); // Attempt to force close to trigger onclose handler
+        }
+        ws.current = null; // Clear ref
     };
 
     // --- Message Handling ---
     ws.current.onmessage = (event) => {
-      try {
-        const messageData: WebSocketMessage = JSON.parse(event.data);
-        const { type, id } = messageData;
+        console.debug("WebSocket message received:", event.data);
+        try {
+          const messageData: WebSocketMessage = JSON.parse(event.data);
+          const { type, id } = messageData;
 
-        // Initial message chunk handling: Create placeholder if needed
-        if (currentAssistantMessageId.current === null && type !== 'end' && type !== 'error') {
-            console.log(`[ID: ${id}] Received first chunk, type: ${type}`);
-            currentAssistantMessageId.current = id;
-            // Add a new, empty assistant message placeholder
-            setMessages(prev => {
-                 // Check if a message with this ID already exists (e.g., from cache hit followed by error?)
-                if (prev.some(msg => msg.id === id)) {
-                    console.warn(`[ID: ${id}] Message placeholder already exists.`);
-                    return prev;
-                }
-                console.log(`[ID: ${id}] Adding new assistant message placeholder.`);
-                // Add placeholder with role and ID, other fields undefined initially
-                return [...prev, { id, role: 'assistant' }];
-            });
+          // 1) Always handle 'end' first, before matching IDs
+          if (type === 'end') {
+              console.log(`[ID: ${id}] Received end signal.`);
+              setIsLoading(false);
+              currentAssistantMessageId.current = null;
+              return;
+          }
+
+          // Handle backend errors specifically
+          if (type === 'error') {
+              console.error(`[ID: ${id}] Backend Error Received:`, messageData.content);
+              const errorId = id || uuidv4(); // Use message ID or generate one
+              const errorMsg = `Backend Error: ${messageData.content || 'Unknown error'}`;
+              setCurrentError(errorMsg);
+              setIsLoading(false);
+
+              // Try to update the placeholder if it exists, otherwise add new error msg
+              setMessages(prev => {
+                   const msgIndex = prev.findIndex(msg => msg.id === errorId && msg.role === 'assistant');
+                   if (msgIndex !== -1) {
+                        const updatedMessages = [...prev];
+                        // Replace placeholder with error content or mark it as error
+                        updatedMessages[msgIndex] = {
+                            ...updatedMessages[msgIndex],
+                            text_content: `Error: ${messageData.content || 'Unknown error'}`, // Show error in chat
+                            isError: true // Add a flag
+                        };
+                        return updatedMessages;
+                   } else {
+                       // If no placeholder, maybe add a generic error message? Or rely on Alert.
+                       // For now, we rely on the Alert banner.
+                       return prev;
+                   }
+              });
+
+              // If the error belongs to the current stream, reset the stream ID
+              if (id === currentAssistantMessageId.current) {
+                  currentAssistantMessageId.current = null;
+              }
+              return; // Stop processing this specific error message here
+          }
+
+          // Initial message chunk handling: Create placeholder if needed
+          if (currentAssistantMessageId.current === null && type !== 'error') {
+              console.log(`[ID: ${id}] Received first chunk, type: ${type}`);
+              currentAssistantMessageId.current = id;
+              // Add a new, empty assistant message placeholder
+              setMessages(prev => {
+                   // Check if a message with this ID already exists (e.g., from cache hit followed by error?)
+                  if (prev.some(msg => msg.id === id)) {
+                      console.warn(`[ID: ${id}] Message placeholder already exists.`);
+                      return prev;
+                  }
+                  console.log(`[ID: ${id}] Adding new assistant message placeholder.`);
+                  // Add placeholder with role and ID, other fields undefined initially
+                  return [...prev, { id, role: 'assistant' }];
+              });
+          }
+
+          // 2) Ignore any messages that don't belong to the current stream
+          if (id !== currentAssistantMessageId.current) {
+              console.warn(`Ignoring message with ID ${id} - does not match current stream ${currentAssistantMessageId.current}`);
+              return;
+          }
+
+          // Update the state immutably
+          setMessages(prevMessages => {
+              // Find the index of the message to update
+              const msgIndex = prevMessages.findIndex(msg => msg.id === id);
+
+              if (msgIndex === -1) {
+                  // Should not happen if placeholder logic works, but log if it does
+                  console.error(`[ID: ${id}] Cannot find message to update.`);
+                  return prevMessages;
+              }
+
+              const updatedMessages = [...prevMessages];
+              let currentMsg = { ...updatedMessages[msgIndex] }; // Create a copy to modify
+
+              // Process based on message type
+              switch (type) {
+                  case 'text':
+                      currentMsg.text_content = (currentMsg.text_content || "") + (messageData.content || "");
+                      console.debug(`[ID: ${id}] Appended text chunk. New length: ${currentMsg.text_content?.length}`);
+                      break;
+                  case 'plot':
+                      if (messageData.plotly_json) {
+                          currentMsg.plotly_json = messageData.plotly_json;
+                          console.log(`[ID: ${id}] Added plot data.`);
+                      }
+                      break;
+                  case 'steps':
+                      if (messageData.steps) {
+                          currentMsg.steps = messageData.steps;
+                          console.log(`[ID: ${id}] Added ${messageData.steps.length} steps.`);
+                      }
+                      break;
+                  // 'end' case is now handled at the top of the function
+                  default:
+                      console.warn(`[ID: ${id}] Received unknown message type:`, type);
+                      return prevMessages; // Return current state
+              }
+
+              // Put the updated message back into the array
+              updatedMessages[msgIndex] = currentMsg;
+              return updatedMessages;
+          });
+
+        } catch (error) {
+          console.error("Failed to parse WebSocket message or update state:", event.data, error);
+          setCurrentError("Received invalid message format from server.");
+          // 3) Always clear loading and reset stream if parsing blows up
+          setIsLoading(false);
+          currentAssistantMessageId.current = null;
         }
-
-        // Handle backend errors specifically
-        if (type === 'error') {
-            console.error(`[ID: ${id}] Backend Error Received:`, messageData.content);
-            const errorId = id || uuidv4(); // Use message ID or generate one
-            const errorMsg = `Backend Error: ${messageData.content || 'Unknown error'}`;
-            setCurrentError(errorMsg);
-            setIsLoading(false);
-
-            // Try to update the placeholder if it exists, otherwise add new error msg
-            setMessages(prev => {
-                 const msgIndex = prev.findIndex(msg => msg.id === errorId && msg.role === 'assistant');
-                 if (msgIndex !== -1) {
-                      const updatedMessages = [...prev];
-                      // Replace placeholder with error content or mark it as error
-                      updatedMessages[msgIndex] = {
-                          ...updatedMessages[msgIndex],
-                          text_content: `Error: ${messageData.content || 'Unknown error'}`, // Show error in chat
-                          isError: true // Add a flag
-                      };
-                      return updatedMessages;
-                 } else {
-                     // If no placeholder, maybe add a generic error message? Or rely on Alert.
-                     // For now, we rely on the Alert banner.
-                     return prev;
-                 }
-            });
-
-            // If the error belongs to the current stream, reset the stream ID
-            if (id === currentAssistantMessageId.current) {
-                currentAssistantMessageId.current = null;
-            }
-            return; // Stop processing this specific error message here
-        }
-
-
-        // Ensure message belongs to the current stream being processed
-        if (id !== currentAssistantMessageId.current) {
-            // Exception: Allow 'end' messages even if ID doesn't match (e.g., for cached streams)
-            if (type === 'end') {
-                console.log(`[ID: ${id}] Received end signal for potentially different stream.`);
-                // If an 'end' comes for the *current* stream, handle normally
-                if (id === currentAssistantMessageId.current) {
-                     setIsLoading(false);
-                     currentAssistantMessageId.current = null;
-                }
-                 // Otherwise, just ignore it (could be from a cancelled/old stream)
-                return;
-            }
-            console.warn(`Ignoring message with ID ${id} - does not match current stream ${currentAssistantMessageId.current}`);
-            return;
-        }
-
-        // Update the state immutably
-        setMessages(prevMessages => {
-            // Find the index of the message to update
-            const msgIndex = prevMessages.findIndex(msg => msg.id === id);
-
-            if (msgIndex === -1) {
-                // Should not happen if placeholder logic works, but log if it does
-                console.error(`[ID: ${id}] Cannot find message to update.`);
-                return prevMessages;
-            }
-
-            const updatedMessages = [...prevMessages];
-            let currentMsg = { ...updatedMessages[msgIndex] }; // Create a copy to modify
-
-            // Process based on message type
-            switch (type) {
-                case 'text':
-                    currentMsg.text_content = (currentMsg.text_content || "") + (messageData.content || "");
-                    console.debug(`[ID: ${id}] Appended text chunk. New length: ${currentMsg.text_content?.length}`);
-                    break;
-                case 'plot':
-                    if (messageData.plotly_json) {
-                        currentMsg.plotly_json = messageData.plotly_json;
-                        console.log(`[ID: ${id}] Added plot data.`);
-                    }
-                    break;
-                case 'steps':
-                    if (messageData.steps) {
-                        currentMsg.steps = messageData.steps;
-                        console.log(`[ID: ${id}] Added ${messageData.steps.length} steps.`);
-                    }
-                    break;
-                case 'end':
-                    console.log(`[ID: ${id}] Received end stream signal.`);
-                    setIsLoading(false); // Stop loading indicator
-                    currentAssistantMessageId.current = null; // Reset for next message
-                    // No state change needed for 'end' itself, just resets loading/stream ID
-                    return prevMessages; // Return current state
-                default:
-                    console.warn(`[ID: ${id}] Received unknown message type:`, type);
-                    return prevMessages; // Return current state
-            }
-
-            // Put the updated message back into the array
-            updatedMessages[msgIndex] = currentMsg;
-            return updatedMessages;
-        });
-
-      } catch (error) {
-        console.error("Failed to parse WebSocket message or update state:", event.data, error);
-        setCurrentError("Received invalid message format from server.");
-        // Consider stopping loading if parse fails mid-stream?
-        // setIsLoading(false);
-        // currentAssistantMessageId.current = null;
-      }
     };
   }, []); // connectWebSocket has no dependencies, runs once
 

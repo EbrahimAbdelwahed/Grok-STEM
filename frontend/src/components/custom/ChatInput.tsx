@@ -64,6 +64,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ input, setInput, onSubmit,
     };
 
     const handleSend = () => {
+        console.debug("ChatInput: Sending message", input);  // NEW
         if (!input.trim() || isLoading || !isConnected) return;
         onSubmit(input);
         setShowSuggestions(false); // Hide suggestions on send

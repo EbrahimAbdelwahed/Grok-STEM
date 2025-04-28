@@ -1,8 +1,7 @@
-import os
 import json
 import logging
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, HttpUrl, field_validator, validator
+from pydantic_settings import BaseSettings
+from pydantic import Field, HttpUrl, validator
 from typing import Optional, List, Union
 
 logger = logging.getLogger(__name__)
@@ -14,6 +13,11 @@ class Settings(BaseSettings):
     XAI_API_KEY: str = Field(..., validation_alias='XAI_API_KEY')
     XAI_BASE_URL: HttpUrl = Field(..., validation_alias='XAI_BASE_URL')
     OPENAI_API_KEY: str = Field(..., validation_alias='OPENAI_API_KEY')
+    OPENAI_BASE_URL: Optional[HttpUrl] = Field(
+        None,
+        validation_alias="OPENAI_BASE_URL",
+        description="Optional override (e.g. proxy) for the OpenAI REST endpoint; DO NOT include /v1."
+    )
 
     # Model names (allow overriding via env vars)
     REASONING_MODEL_NAME: str = Field(
@@ -51,6 +55,27 @@ class Settings(BaseSettings):
 
     # --- Backend Settings ---
     LOG_LEVEL: str = Field("INFO", validation_alias='LOG_LEVEL')
+    # --- Observability ------------------------------------------------------- #
+    VERBOSE_TRACE: bool = Field(
+        False,
+        validation_alias="VERBOSE_TRACE",
+        description="Emit entry/exit logs for each @trace-decorated function."
+    )
+    HTTP_LOG_BODY: bool = Field(
+        False,
+        validation_alias="HTTP_LOG_BODY",
+        description="Log request/response bodies for outbound HTTP when True."
+    )
+    TRACE_ID_HEADER: str = Field(
+        "x-request-id",
+        validation_alias="TRACE_ID_HEADER",
+        description="Header used to propagate correlation IDs."
+    )
+    LOG_JSON: bool = Field(
+        False,
+        validation_alias="LOG_JSON",
+        description="Emit logs in JSON format instead of plain text."
+    )
 
     # --- CORS Origins ---
     CORS_ALLOWED_ORIGINS: Union[str, List[str]] = Field(
@@ -58,9 +83,24 @@ class Settings(BaseSettings):
         validation_alias='CORS_ALLOWED_ORIGINS',
     )
 
-    _cors_origins_list: List[str] = [] # Private attribute to store parsed list
+    # ------------------------------------------------------------------ #
+    # Validators
+    # ------------------------------------------------------------------ #
 
-    # Pydantic V2 validator for CORS_ALLOWED_ORIGINS
+    @validator("OPENAI_BASE_URL", pre=True, always=True)
+    def normalise_openai_base(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Ensure we do not keep an erroneous '/v1' at the end of the custom
+        base URL – the OpenAI Python SDK appends '/v1' automatically.
+        """
+        if not v:
+            return v
+        v = v.rstrip("/")  # remove trailing slash
+        if v.endswith("/v1"):
+            logger.debug("Trimming surplus '/v1' from OPENAI_BASE_URL.")
+            v = v[: -len("/v1")]
+        return v
+
     @validator('CORS_ALLOWED_ORIGINS', pre=True, always=True)
     def parse_cors_origins(cls, v):
         if isinstance(v, list):
@@ -68,39 +108,33 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             v = v.strip()
             if not v:
-                return [] # Return empty list if string is empty
+                return []
             if v.startswith('[') and v.endswith(']'):
                 try:
                     parsed_list = json.loads(v)
                     if isinstance(parsed_list, list):
                         return [str(origin).strip() for origin in parsed_list if str(origin).strip()]
-                    else:
-                        logger.warning(f"CORS_ALLOWED_ORIGINS JSON string did not decode to a list: {v}")
-                        return []
+                    logger.warning("CORS_ALLOWED_ORIGINS JSON did not decode to a list.")
+                    return []
                 except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse CORS_ALLOWED_ORIGINS as JSON list: {v}. Falling back to comma-separated.")
-            # Fallback to comma-separated
+                    logger.warning("Failed to parse CORS_ALLOWED_ORIGINS JSON; falling back to comma-sep list.")
             return [origin.strip() for origin in v.split(',') if origin.strip()]
-        # Handle case where it's neither string nor list (e.g., None)
-        logger.warning(f"Invalid type for CORS_ALLOWED_ORIGINS: {type(v)}. Returning empty list.")
+        logger.warning("Invalid type for CORS_ALLOWED_ORIGINS. Returning empty list.")
         return []
+    
+    @validator("TRACE_ID_HEADER", pre=True, always=True)
+    def lower_header(cls, v: str) -> str:
+        return v.lower().strip()
 
-    # Use a property to access the correctly parsed list
+    # Convenience property
     @property
     def cors_allowed_origins_list(self) -> List[str]:
-         # The validator ensures CORS_ALLOWED_ORIGINS is always a list of strings
         return self.CORS_ALLOWED_ORIGINS
 
 
-    # Load from .env file if it exists
     class Config:
         env_file = '.env'
         env_file_encoding = 'utf-8'
-        # For Pydantic V2 SettingsConfigDict is used instead of inner class Config
-        # model_config = SettingsConfigDict(
-        #     env_file='.env',
-        #     env_file_encoding='utf-8'
-        # )
 
 # Create a single instance for import elsewhere
 settings = Settings()
