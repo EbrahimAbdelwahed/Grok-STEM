@@ -7,9 +7,9 @@ from httpx import Timeout, AsyncClient
 from openai import OpenAI, AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusError
 from openai._exceptions import NotFoundError
 
-from config import settings
-from observability.http_logging import get_async_http_client  # FIX: use absolute import from package root
-from observability import trace  # FIX: use absolute import for trace
+from backend.config import settings
+from backend.observability.http_logging import get_async_http_client
+from backend.observability import trace
 
 logger = logging.getLogger(__name__)
 

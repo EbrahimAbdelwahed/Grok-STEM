@@ -33,6 +33,8 @@ services:
       - ./backend:/app # Mount backend code into the container for development (hot-reloading)
     env_file:
       - ./backend/.env # Load environment variables from .env file in backend directory
+    environment:
+      - PYTHONPATH=/app  # Set the app directory as the root for Python imports
     networks:
       - grok_stem_network
     depends_on: # Ensure Qdrant starts before the backend

@@ -8,7 +8,7 @@ import { NodeGlobalsPolyfillPlugin } from '@esbuild-plugins/node-globals-polyfil
 import { NodeModulesPolyfillPlugin } from '@esbuild-plugins/node-modules-polyfill'
 
 // your ngrok domain
-const NGROK_HOST = 'd9df-34-17-86-106.ngrok-free.app'
+const NGROK_HOST = 'e35f-34-17-86-106.ngrok-free.app'
 
 // https://vitejs.dev/config/
 export default defineConfig({

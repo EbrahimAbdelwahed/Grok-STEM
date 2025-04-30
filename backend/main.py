@@ -9,29 +9,23 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from dotenv import load_dotenv
 
 # Import backend components
-from config import settings
-from chat_logic import process_user_message
-from qdrant_service import check_qdrant_status, close_qdrant_client, qdrant_client
-from llm_clients import check_llm_api_status, close_openai_client, close_grok_client # Assuming close functions exist
-import schemas # Import schemas for error payloads
-from backend.observability import trace  # NEW
+from backend.config import settings
+from backend.chat_logic import process_user_message
+from backend.qdrant_service import check_qdrant_status, close_qdrant_client, qdrant_client
+from backend.llm_clients import check_llm_api_status, close_openai_client, close_grok_client
+from backend.schemas import ChatMessage, ChatResponse
+from backend.observability import trace
+from backend import set_correlation_id, clear_correlation_id, correlation_id_var
+from backend.observability.tracing_middleware import tracing_middleware
 
-# --- Configuration & Logging ---
+# Load environment variables
 load_dotenv()
 
-# Ensure log level is valid
-log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
-if log_level_str not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
-    log_level_str = "INFO"
-
-logging.basicConfig(
-    level=log_level_str,
-    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 # Log loaded settings
@@ -57,7 +51,6 @@ app = FastAPI(
 )
 
 # --- Middleware for Request Tracing ---
-from backend.observability.tracing_middleware import tracing_middleware
 app.middleware("http")(tracing_middleware)
 
 # --- CORS Middleware ---
@@ -69,6 +62,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Correlation ID Middleware ---
+class CorrelationIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        cid = request.headers.get(settings.TRACE_ID_HEADER)
+        set_correlation_id(cid)
+        try:
+            response = await call_next(request)
+        finally:
+            clear_correlation_id()
+        response.headers[settings.TRACE_ID_HEADER] = correlation_id_var.get()
+        return response
+
+app.add_middleware(CorrelationIdMiddleware)
+
 # --- WebSocket Connection Manager ---
 class ConnectionManager:
     def __init__(self):
@@ -77,16 +84,19 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket) -> str:
         await websocket.accept()
         client_id = uuid.uuid4().hex # Assign a unique ID to each connection
+        cid = set_correlation_id(client_id)
         self.active_connections[client_id] = websocket
-        logger.info(f"WebSocket connected: {websocket.client.host}:{websocket.client.port} (ID: {client_id}). Total: {len(self.active_connections)}")
+        logger.info(f"WebSocket connected: {websocket.client.host}:{websocket.client.port}. Total: {len(self.active_connections)}")
         return client_id
 
     def disconnect(self, client_id: str):
         if client_id in self.active_connections:
-            websocket = self.active_connections.pop(client_id)
-            logger.info(f"WebSocket disconnected: {websocket.client.host}:{websocket.client.port} (ID: {client_id}). Total: {len(self.active_connections)}")
-        else:
-            logger.warning(f"Attempted to disconnect non-existent client ID: {client_id}")
+            set_correlation_id(client_id)
+            try:
+                websocket = self.active_connections.pop(client_id)
+                logger.info(f"WebSocket disconnected: {websocket.client.host}:{websocket.client.port}. Total: {len(self.active_connections)}")
+            finally:
+                clear_correlation_id()
 
     async def send_personal_json(self, message: dict, client_id: str):
         if client_id in self.active_connections:

@@ -4,8 +4,9 @@ import uuid
 from typing import Callable, Awaitable
 
 from fastapi import Request, Response
+
 from backend.config import settings
-from backend.observability.tracing import set_request_id
+from backend.observability import set_request_id
 
 logger = logging.getLogger(__name__)
 
