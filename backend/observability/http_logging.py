@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from backend.config import settings
-from backend import get_correlation_id as get_request_id
+# Now import directly from logging_setup to avoid circular imports
+from backend.logging_setup import get_correlation_id as get_request_id
 
 logger = logging.getLogger(__name__)
 _TRUNC = 400  # char preview length
@@ -36,7 +37,7 @@ def _preview(blob: Optional[bytes | str]) -> str:
 def _build_hooks() -> Dict[str, List]:
     """
     Build HTTPX event hooks that will:
-    1. Inject the current request‑ID into the outgoing headers.
+    1. Inject the current request-ID into the outgoing headers.
     2. Capture latency and formatted request/response information for logging.
     """
     async def on_request(request: httpx.Request) -> None:

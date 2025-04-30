@@ -16,7 +16,6 @@ try:
          url=settings.QDRANT_URL,
          api_key=settings.QDRANT_API_KEY or None,
          timeout=60,
-         http_client=get_async_http_client(timeout=60)  # NEW
     )
     logger.info("Async Qdrant client initialized successfully.")
 except Exception as e:
@@ -66,7 +65,7 @@ async def ensure_collection_exists(
         logger.error(f"Unexpected error checking/creating collection '{collection_name}': {e}", exc_info=True)
         return False
 
-@trace("qdrant_status")  # NEW
+
 async def check_qdrant_status() -> dict:
     """
     Performs a basic health check on the Qdrant connection.

@@ -9,7 +9,7 @@ from openai._exceptions import NotFoundError
 
 from backend.config import settings
 from backend.observability.http_logging import get_async_http_client
-from backend.observability import trace
+
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def _create_openai_client() -> AsyncOpenAI:
     return AsyncOpenAI(**kwargs)
 
 
-@trace("llm_reasoning")  # NEW
+
 async def _validate_plot_model(client: AsyncOpenAI, model_name: str) -> bool:
     """
     Returns True if the given model is available to this API key, False otherwise.

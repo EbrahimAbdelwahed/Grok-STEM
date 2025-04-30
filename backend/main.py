@@ -1,27 +1,37 @@
+"""
+FastAPI application entrypoint.
+
+This module bootstraps the FastAPI application, making sure logging is
+configured before anything else runs, and adds correlation-ID
+middleware that injects a trace ID into every response.
+"""
+
 import os
-import logging
 import uuid
 import asyncio
+import logging
 from typing import List, Dict, Any
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from dotenv import load_dotenv
+
+# Configure logging first, before any other imports
+from backend.logging_setup import configure_logging, set_correlation_id, clear_correlation_id, get_correlation_id
+configure_logging()
+
+# Now import the rest after logging is configured
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-
-from dotenv import load_dotenv
 
 # Import backend components
 from backend.config import settings
 from backend.chat_logic import process_user_message
 from backend.qdrant_service import check_qdrant_status, close_qdrant_client, qdrant_client
 from backend.llm_clients import check_llm_api_status, close_openai_client, close_grok_client
-from backend.schemas import ChatMessage, ChatResponse
-from backend.observability import trace
-from backend import set_correlation_id, clear_correlation_id, correlation_id_var
-from backend.observability.tracing_middleware import tracing_middleware
+from backend.observability import tracing_middleware
 
 # Load environment variables
 load_dotenv()
@@ -64,14 +74,14 @@ app.add_middleware(
 
 # --- Correlation ID Middleware ---
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
+    async def dispatch(self, request: Request, call_next):
         cid = request.headers.get(settings.TRACE_ID_HEADER)
         set_correlation_id(cid)
         try:
             response = await call_next(request)
         finally:
             clear_correlation_id()
-        response.headers[settings.TRACE_ID_HEADER] = correlation_id_var.get()
+        response.headers[settings.TRACE_ID_HEADER] = get_correlation_id()
         return response
 
 app.add_middleware(CorrelationIdMiddleware)
@@ -118,7 +128,7 @@ async def read_root():
     logger.debug("Root endpoint '/' accessed.")
     return {"message": "GrokSTEM Backend is running"}
 
-@trace("health_check")  # NEW
+
 @app.get("/health", tags=["Health"], response_model=Dict[str, Any])
 async def health_check():
     """Checks the status of the backend and its dependencies."""
@@ -133,7 +143,7 @@ async def health_check():
         "dependencies": {"qdrant": qdrant_status, "llms": llm_status}
     }
 
-@trace("websocket_endpoint")  # NEW
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Handles WebSocket connections and delegates message processing."""
@@ -224,12 +234,11 @@ if static_files_app: # Only add fallback if static files are being served
 if __name__ == "__main__":
     import uvicorn
     logger.info(f"Starting Uvicorn server directly on port 8000 with log level {settings.LOG_LEVEL}...")
-    # Note: Uvicorn logging config might need adjustment for optimal format with basicConfig
     uvicorn.run(
-        "main:app", # Use string for reload to work properly
+        "backend.main:app",  # Use full module path for proper imports
         host="0.0.0.0",
         port=8000,
-        log_level=settings.LOG_LEVEL.lower(), # Use lowercase for uvicorn log_level
-        reload=True, # Enable reload for local development
-        reload_dirs=[str(Path(__file__).parent)] # Specify directory to watch for reload
+        log_level=settings.LOG_LEVEL.lower(),  # Use lowercase for uvicorn log_level
+        reload=True,  # Enable reload for local development
+        reload_dirs=[str(Path(__file__).parent.parent)]  # Watch the entire backend directory
     )
