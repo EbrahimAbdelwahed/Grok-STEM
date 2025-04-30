@@ -1,61 +1,97 @@
-import logging
-import json
-import asyncio
-from typing import List, Optional
 
+import os
+import json
+import logging
+import asyncio
+from typing import List, Dict, Any, Optional
+
+# ---- Third‑party -----------------------------------------------------------
+from dotenv import load_dotenv
 from httpx import Timeout, AsyncClient
 from openai import OpenAI, AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusError
 from openai._exceptions import NotFoundError
 
+# ---- Internal --------------------------------------------------------------
 from backend.config import settings
 from backend.observability.http_logging import get_async_http_client
 
+# ----------------------------------------------------------------------------
+# Environment bootstrap
+# ----------------------------------------------------------------------------
+#
+#   • Allows local development by reading .env but does not interfere with
+#     production (where ENV‑vars will already be present).
+#   • We *only* set OPENAI_API_KEY if it is missing in settings.
+#
+load_dotenv()
 
+if not getattr(settings, "OPENAI_API_KEY", None):
+    # Falls back to raw env variable so settings can still override.
+    settings.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not getattr(settings, "XAI_API_KEY", None):
+    settings.XAI_API_KEY = os.getenv("XAI_API_KEY")
+
+# ----------------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
 
-# --- Configure Timeouts ---
-GROK_TIMEOUT = Timeout(450.0, connect=15.0)  # For reasoning tasks
+# ----------------------------------------------------------------------------
+# Timeout / Retry configuration
+# ----------------------------------------------------------------------------
+GROK_TIMEOUT = Timeout(450.0, connect=15.0)  # reasoning tasks
 PLOTTING_TIMEOUT = 60  # seconds for plotting tasks
 
-# --- Grok Client (using OpenAI SDK structure) ---
+# ----------------------------------------------------------------------------
+# Grok client (AsyncOpenAI‑compatible)
+# ----------------------------------------------------------------------------
 grok_client: Optional[AsyncOpenAI] = None
 try:
     if settings.XAI_API_KEY and settings.XAI_BASE_URL:
-        logger.info(f"Initializing Grok client for: {settings.XAI_BASE_URL}")
+        logger.info("Initialising Grok client for %s", settings.XAI_BASE_URL)
         grok_client = AsyncOpenAI(
             base_url=str(settings.XAI_BASE_URL),
             api_key=settings.XAI_API_KEY,
             timeout=GROK_TIMEOUT,
             max_retries=2,
         )
-        logger.info("Grok client initialized.")
     else:
-        logger.warning("XAI_API_KEY or XAI_BASE_URL not set. Grok client will not be initialized.")
-except Exception as e:
-    logger.error(f"Failed to initialize Grok client: {e}", exc_info=True)
+        logger.warning("XAI_API_KEY or XAI_BASE_URL not set. Grok client will not be initialised.")
+except Exception as exc:  # pragma: no cover
+    # Should never blow‑up on import – just log & continue
+    logger.error("Failed to initialise Grok client: %s", exc, exc_info=True)
     grok_client = None
 
-# --- Lazy OpenAI Client for Plotting ---
+# ----------------------------------------------------------------------------
+# Lazy OpenAI (plotting) client
+# ----------------------------------------------------------------------------
 _openai_plot_client: Optional[AsyncOpenAI] = None
 
 
 def _create_openai_client() -> AsyncOpenAI:
-    kwargs = {
+    """
+    Internal helper to build a fully‑configured AsyncOpenAI instance for the
+    plotting model. We wrap it so we can unit‑test w/out hitting the network.
+    """
+    kwargs: Dict[str, Any] = {
         "api_key": settings.OPENAI_API_KEY,
         "timeout": PLOTTING_TIMEOUT,
         "max_retries": 2,
-        "http_client": get_async_http_client(timeout=PLOTTING_TIMEOUT)  # NEW
+        # Inject our HTTPX client with extra logging
+        "http_client": get_async_http_client(timeout=PLOTTING_TIMEOUT),
     }
     if settings.OPENAI_BASE_URL:
         kwargs["base_url"] = str(settings.OPENAI_BASE_URL)
+
     logger.info("Initialising OpenAI client (plotting)…")
     return AsyncOpenAI(**kwargs)
 
 
-
 async def _validate_plot_model(client: AsyncOpenAI, model_name: str) -> bool:
     """
-    Returns True if the given model is available to this API key, False otherwise.
+    Quick HEAD‑style check to see if the chosen model is accessible.
+    We do this once on first demand; it's *not* fatal to start‑up if it fails.
     """
     try:
         await client.models.retrieve(model_name)
@@ -64,12 +100,12 @@ async def _validate_plot_model(client: AsyncOpenAI, model_name: str) -> bool:
         return False
     except Exception as exc:
         logger.warning("Unexpected error while validating plot model: %s", exc)
-        return True  # don't block start-up on transient issues
+        return True  # Don't block on transient issues
 
 
 async def get_openai_plot_client() -> AsyncOpenAI:
     """
-    Lazily (async) initialises and validates the plotting OpenAI client.
+    Lazily build / cache the plotting AsyncOpenAI client.
     """
     global _openai_plot_client
     if _openai_plot_client:
@@ -81,19 +117,29 @@ async def get_openai_plot_client() -> AsyncOpenAI:
             "The plotting model '%s' is not available for this API key.",
             settings.PLOTTING_MODEL_NAME,
         )
-        # Optionally raise or switch model dynamically.
     _openai_plot_client = client
     return _openai_plot_client
 
-# --- High-level Helper Functions ---
-
-
-async def get_grok_reasoning(messages: list, effort: str = "medium") -> dict:
-    """Calls the Grok reasoning model using the OpenAI SDK compatibility."""
+# ----------------------------------------------------------------------------
+# High‑level helper functions
+# ----------------------------------------------------------------------------
+async def get_grok_reasoning(
+    messages: List[Dict[str, str]],
+    effort: str = "medium",
+) -> Dict[str, Any]:
+    """
+    Fire a chat completion against the Grok reasoning model.
+    """
     if not grok_client:
-        raise ConnectionError("Grok client is not initialized. Check API key and base URL.")
+        raise ConnectionError("Grok client is not initialised. Check API key and base URL.")
 
-    logger.debug(f"Sending {len(messages)} messages to Grok model '{settings.REASONING_MODEL_NAME}' with effort '{effort}'.")
+    logger.debug(
+        "Sending %d messages to Grok model '%s' with effort '%s'.",
+        len(messages),
+        settings.REASONING_MODEL_NAME,
+        effort,
+    )
+
     try:
         completion = await grok_client.chat.completions.create(
             model=settings.REASONING_MODEL_NAME,
@@ -107,7 +153,7 @@ async def get_grok_reasoning(messages: list, effort: str = "medium") -> dict:
             raise ValueError("Grok API returned an unexpected empty response structure.")
 
         response_message = completion.choices[0].message
-        logger.debug(f"Grok response message object: {response_message.model_dump_json(indent=2)}")
+        logger.debug("Grok response message: %s", response_message.model_dump_json(indent=2))
 
         if not response_message.content:
             logger.warning("Grok response message content is empty or None.")
@@ -115,27 +161,21 @@ async def get_grok_reasoning(messages: list, effort: str = "medium") -> dict:
         return response_message.model_dump()
 
     except (APIConnectionError, RateLimitError, APIStatusError) as api_err:
-        logger.error(f"Grok API Error: {api_err}", exc_info=True)
-        raise ConnectionError(f"Grok API Error: {api_err}") from api_err
-    except Exception as e:
-        logger.error(f"Unexpected error calling Grok API: {e}", exc_info=True)
+        logger.error("Grok API error: %s", api_err, exc_info=True)
+        raise ConnectionError(f"Grok API error: {api_err}") from api_err
+    except Exception as exc:
+        logger.error("Unexpected error calling Grok API: %s", exc, exc_info=True)
         raise
 
 
-async def get_plotly_json(messages: List[dict]) -> Optional[dict]:
+async def get_plotly_json(messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     """
-    Calls the OpenAI plotting model, expecting a valid Plotly JSON object
-    or the literal string "NO_PLOT".
+    Call the plotting model and parse a valid Plotly spec, or return None.
 
     Parameters
     ----------
     messages : List[dict]
         A standard OpenAI Chat API messages list.
-
-    Returns
-    -------
-    dict | None
-        Parsed Plotly spec or None if the model says "NO_PLOT" or an error occurs.
     """
     client = await get_openai_plot_client()
 
@@ -147,6 +187,7 @@ async def get_plotly_json(messages: List[dict]) -> Optional[dict]:
             response_format={"type": "json_object"},
             seed=42,
         )
+
         content = (completion.choices[0].message.content or "").strip()
 
         if content.upper() == "NO_PLOT":
@@ -170,89 +211,102 @@ async def get_plotly_json(messages: List[dict]) -> Optional[dict]:
     return None
 
 
-async def check_llm_api_status(client_type: str = "all") -> dict:
+# ---------------------------------------------------------------------------
+# Convenience wrapper (from the legacy file)
+# ---------------------------------------------------------------------------
+async def generate_plotly_json_from_conversation(
+    conversation: List[Dict[str, str]],
+) -> Optional[Dict[str, Any]]:
     """
-    Performs a basic check of the LLM API connectivity.
-    Avoids making actual completion calls if possible to save cost/tokens.
-    Returns a dictionary with the status of each checked client.
-    """
-    status = {}
+    Legacy‑friendly helper that takes a *conversation* (user/assistant messages)
+    and appends a system prompt asking for a Plotly spec.
 
-    async def _check_client(name: str, client: Optional[AsyncOpenAI]):
+    This mirrors the behaviour found in the now‑removed implementation so that
+    existing callers continue to work.
+    """
+    prompt = (
+        "Based on the conversation, produce a Plotly JSON for any required chart, "
+        "or return the string NO_PLOT if no chart is needed."
+    )
+    full_messages = conversation + [{"role": "system", "content": prompt}]
+    return await get_plotly_json(full_messages)
+
+# ----------------------------------------------------------------------------
+# Health‑check utilities
+# ----------------------------------------------------------------------------
+async def check_llm_api_status(client_type: str = "all") -> Dict[str, str]:
+    """
+    Minimal connectivity test for each LLM backend. Avoids expensive completions.
+    """
+    status: Dict[str, str] = {}
+
+    async def _check_client(name: str, client: Optional[AsyncOpenAI]) -> str:
         if not client:
-            return f"{name} client not initialized."
+            return f"{name} client not initialised."
         try:
             async with AsyncClient(base_url=str(client.base_url), timeout=10) as http_client:
                 response = await http_client.head("/")
                 response.raise_for_status()
             return "ok"
-        except Exception as e:
-            logger.warning(f"Health check failed for {name} client: {e}")
-            return f"Error connecting to {name} API: {str(e)[:100]}..."
+        except Exception as exc:
+            logger.warning("Health‑check failed for %s client: %s", name, exc)
+            return f"Error connecting to {name} API: {str(exc)[:100]}…"
 
-    if client_type == "all" or client_type == "grok":
+    if client_type in ("all", "grok"):
         status["grok"] = await _check_client("Grok", grok_client)
 
-    if client_type == "all" or client_type == "openai":
-        # Note: Use _openai_plot_client if already initialised; otherwise lazy initialization will occur later.
+    if client_type in ("all", "openai"):
         openai_client = _openai_plot_client or None
         status["openai_plotting"] = await _check_client("OpenAI Plotting", openai_client)
 
     return status
 
-
-# --- Cleanup Functions ---
-
-
-async def close_openai_client():
-    """Closes the OpenAI plotting client."""
+# ----------------------------------------------------------------------------
+# Cleanup helpers (to be called on app shutdown)
+# ----------------------------------------------------------------------------
+async def close_openai_client() -> None:
+    """Close and release the plotting client."""
     global _openai_plot_client
     if _openai_plot_client:
         logger.info("Closing OpenAI plotting client.")
         await _openai_plot_client.close()
-        logger.info("OpenAI plotting client closed.")
         _openai_plot_client = None
+        logger.info("OpenAI plotting client closed.")
 
 
-async def close_grok_client():
-    """Closes the Grok client."""
+async def close_grok_client() -> None:
+    """Close and release the Grok client."""
     global grok_client
     if grok_client:
         logger.info("Closing Grok client.")
         await grok_client.close()
-        logger.info("Grok client closed.")
         grok_client = None
+        logger.info("Grok client closed.")
 
-
-# --- Simple Test (Commented out actual API calls) ---
+# ----------------------------------------------------------------------------
+# Quick manual test (run with: `python -m backend.llm_clients`)
+# ----------------------------------------------------------------------------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
-    async def test_clients():
-        print("\n--- LLM Client Initialization Status ---")
-        print(f"Grok Client Initialized: {'Yes' if grok_client else 'No'}")
-        print(f"OpenAI Plotting Client Initialized: {'Yes' if _openai_plot_client else 'No'}")
+    async def _test() -> None:
+        print("\n--- LLM Client initialisation status ---")
+        print(f"Grok Client initialised: {'Yes' if grok_client else 'No'}")
+        print(f"OpenAI Plotting Client initialised: {'Yes' if _openai_plot_client else 'No'}")
 
-        print("\n--- LLM API Status Check ---")
+        print("\n--- Health check ---")
         api_status = await check_llm_api_status()
-        print(f"Grok Status: {api_status.get('grok', 'Not Checked')}")
-        print(f"OpenAI Plotting Status: {api_status.get('openai_plotting', 'Not Checked')}")
+        for name, st in api_status.items():
+            print(f"{name:>18}: {st}")
 
-        # Uncomment below to test API calls
+        # Example calls (commented out to save tokens)
         # if grok_client:
-        #     try:
-        #         test_msg = [{"role": "user", "content": "Explain entropy briefly."}]
-        #         response = await get_grok_reasoning(test_msg)
-        #         print("Grok Test Response:", response)
-        #     except Exception as e:
-        #         print(f"Grok test call failed: {e}")
+        #     reasoning = await get_grok_reasoning([{"role": "user", "content": "Explain entropy in one sentence."}])
+        #     print("\nGrok reasoning →", reasoning)
+        #
+        # plot = await generate_plotly_json_from_conversation(
+        #     [{"role": "user", "content": "Please chart y = x^2 from -3 to 3."}]
+        # )
+        # print("\nPlot JSON →", plot)
 
-        # if _openai_plot_client:
-        #     try:
-        #         test_msg = [{"role": "user", "content": "Generate Plotly JSON for y=x^2 from -2 to 2"}]
-        #         response = await get_plotly_json(test_msg)
-        #         print("OpenAI Plotting Test Response:", response)
-        #     except Exception as e:
-        #         print(f"OpenAI Plotting test call failed: {e}")
-
-    asyncio.run(test_clients())
+    asyncio.run(_test())
