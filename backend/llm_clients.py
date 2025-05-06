@@ -44,9 +44,10 @@ PLOTTING_TIMEOUT = 60  # seconds for plotting tasks
 grok_client: Optional[AsyncOpenAI] = None
 try:
     if settings.XAI_API_KEY and settings.XAI_BASE_URL:
+        base=str(settings.XAI_BASE_URL).rstrip("/")
         logger.info("Initialising Grok client for %s", settings.XAI_BASE_URL)
         grok_client = AsyncOpenAI(
-            base_url=str(settings.XAI_BASE_URL),
+            base_url=f"{base}/v1",
             api_key=settings.XAI_API_KEY,
             timeout=GROK_TIMEOUT,
             max_retries=2,

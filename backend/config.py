@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # --- LLM API Keys & Config ---
     XAI_API_KEY: str = Field(..., validation_alias='XAI_API_KEY')
-    XAI_BASE_URL: HttpUrl = Field(..., validation_alias='XAI_BASE_URL')
+    XAI_BASE_URL: HttpUrl = Field(..., env='XAI_BASE_URL')
     OPENAI_API_KEY: str = Field(..., validation_alias='OPENAI_API_KEY')
     OPENAI_BASE_URL: Optional[HttpUrl] = Field(
         None,
