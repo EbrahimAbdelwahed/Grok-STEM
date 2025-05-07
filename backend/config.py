@@ -1,3 +1,5 @@
+# backend/config.py
+
 import json
 import logging
 from pydantic_settings import BaseSettings
@@ -26,16 +28,20 @@ class Settings(BaseSettings):
     PLOTTING_MODEL_NAME: str = Field(
         "gpt-4o-mini", validation_alias='PLOTTING_MODEL_NAME'
     )
+    # NEW: Model for generating image prompts from user queries
+    IMAGE_PROMPT_GEN_MODEL_NAME: str = Field(
+        "gpt-4o-mini", validation_alias='IMAGE_PROMPT_GEN_MODEL_NAME'
+    )
+    # NEW: Model for actual image generation
+    IMAGE_MODEL_NAME: str = Field(
+        "dall-e-3", validation_alias='IMAGE_MODEL_NAME' # Using DALL-E 3 as placeholder
+    )
+
 
     # --- Embedding Model Configuration ---
-    # Using all-MiniLM-L6-v2 as default for both RAG and Cache
     EMBEDDING_MODEL_NAME: str = Field(
         "sentence-transformers/all-MiniLM-L6-v2", validation_alias='EMBEDDING_MODEL_NAME'
     )
-    # Vector dimensions are derived in rag_utils.py after loading model,
-    # but we can define expected defaults or allow override here if needed.
-    # RAG_VECTOR_DIM: int = Field(384, validation_alias='RAG_VECTOR_DIM')
-    # CACHE_VECTOR_DIM: int = Field(384, validation_alias='CACHE_VECTOR_DIM')
 
     # --- Qdrant Configuration ---
     QDRANT_URL: str = Field("http://qdrant:6333", validation_alias='QDRANT_URL')
@@ -43,15 +49,25 @@ class Settings(BaseSettings):
     QDRANT_RAG_COLLECTION: str = Field(
         "stem_rag_kb", validation_alias='QDRANT_RAG_COLLECTION'
     )
-    QDRANT_CACHE_COLLECTION: str = Field(
+    QDRANT_CACHE_COLLECTION: str = Field( # Semantic (LLM response) Cache
         "semantic_cache", validation_alias='QDRANT_CACHE_COLLECTION'
     )
+    QDRANT_IMAGE_CACHE_COLLECTION: str = Field( # NEW: Image Cache
+        "image_cache", validation_alias='QDRANT_IMAGE_CACHE_COLLECTION'
+    )
+
 
     # --- RAG & Cache Settings ---
-    RAG_NUM_RESULTS: int = Field(3, validation_alias='RAG_NUM_RESULTS') # Increased default slightly
-    CACHE_THRESHOLD: float = Field(
-        0.92, validation_alias='CACHE_THRESHOLD' # Slightly increased default
+    RAG_NUM_RESULTS: int = Field(3, validation_alias='RAG_NUM_RESULTS')
+    CACHE_THRESHOLD: float = Field( # Semantic (LLM response) Cache
+        0.92, validation_alias='CACHE_THRESHOLD'
     )
+    IMAGE_CACHE_THRESHOLD: float = Field( # NEW: Image Cache Threshold
+        0.95, validation_alias='IMAGE_CACHE_THRESHOLD' # Higher threshold often desired for images
+    )
+    # IMAGE_CACHE_TTL_DAYS: Optional[int] = Field( # NEW: Optional TTL (Not implemented yet)
+    #     None, validation_alias='IMAGE_CACHE_TTL_DAYS', description="Optional: Days until image cache entries expire (requires separate cleanup process)"
+    # )
 
     # --- Backend Settings ---
     LOG_LEVEL: str = Field("INFO", validation_alias='LOG_LEVEL')
@@ -121,7 +137,7 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(',') if origin.strip()]
         logger.warning("Invalid type for CORS_ALLOWED_ORIGINS. Returning empty list.")
         return []
-    
+
     @validator("TRACE_ID_HEADER", pre=True, always=True)
     def lower_header(cls, v: str) -> str:
         return v.lower().strip()
@@ -129,12 +145,20 @@ class Settings(BaseSettings):
     # Convenience property
     @property
     def cors_allowed_origins_list(self) -> List[str]:
-        return self.CORS_ALLOWED_ORIGINS
+        # This handles the case where it might already be a list or needs parsing
+        if isinstance(self.CORS_ALLOWED_ORIGINS, list):
+            return self.CORS_ALLOWED_ORIGINS
+        else:
+            # Re-run parsing logic if accessed as property and wasn't list initially
+            return self.parse_cors_origins(self.CORS_ALLOWED_ORIGINS)
 
 
     class Config:
         env_file = '.env'
         env_file_encoding = 'utf-8'
+        # Allow extra fields if needed, though usually better to define all explicitly
+        # extra = 'ignore'
+
 
 # Create a single instance for import elsewhere
 settings = Settings()
@@ -144,8 +168,11 @@ settings = Settings()
 # logger.info("GrokSTEM Backend Settings Loaded:")
 # logger.info(f"  - Reasoning Model: {settings.REASONING_MODEL_NAME}")
 # logger.info(f"  - Plotting Model: {settings.PLOTTING_MODEL_NAME}")
+# logger.info(f"  - Image Prompt Gen Model: {settings.IMAGE_PROMPT_GEN_MODEL_NAME}") # NEW
+# logger.info(f"  - Image Gen Model: {settings.IMAGE_MODEL_NAME}") # NEW
 # logger.info(f"  - Qdrant URL: {settings.QDRANT_URL}")
 # logger.info(f"  - RAG Collection: {settings.QDRANT_RAG_COLLECTION}")
 # logger.info(f"  - Cache Collection: {settings.QDRANT_CACHE_COLLECTION}")
+# logger.info(f"  - Image Cache Collection: {settings.QDRANT_IMAGE_CACHE_COLLECTION}") # NEW
 # logger.info(f"  - CORS Origins: {settings.cors_allowed_origins_list}")
 # logger.info(f"  - Log Level: {settings.LOG_LEVEL}")

@@ -1,61 +1,41 @@
 // frontend/src/components/custom/ChatMessage.tsx
-import React, { useState } from 'react';
+import React from 'react';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { Button } from '../ui/button';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
 interface ChatMessageProps {
   content: string;
   isError?: boolean;
-  isMeta?: boolean;
+  errorContent?: string | null; // Optional specific error content
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ content, isError = false, isMeta = false }) => {
-  const [expanded, setExpanded] = useState(false);
-  const toggleExpanded = () => setExpanded((prev) => !prev);
+export const ChatMessage: React.FC<ChatMessageProps> = ({
+    content,
+    isError = false,
+    errorContent = "An error occurred."
+}) => {
 
-  // If meta (steps placeholder), render differently
-  if (isMeta) {
+  if (isError) {
     return (
-      <div className="p-2 my-2 bg-gray-100 dark:bg-gray-700 rounded">
-        <em className="text-sm text-gray-600 dark:text-gray-300">{content}</em>
+      <div className="p-3 my-1 rounded-lg bg-destructive/10 text-destructive dark:bg-destructive/20">
+        <div className="flex items-start space-x-2">
+            <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
+            <div className="flex-1">
+                <p className="font-medium text-sm">Error</p>
+                <p className="text-xs">{content || errorContent}</p>
+            </div>
+        </div>
       </div>
     );
   }
 
+  // Render normal message content using Markdown
   return (
-    <div
-      className={`p-4 my-2 rounded-lg ${
-        isError
-          ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
-          : 'bg-white text-gray-900 dark:bg-gray-800 dark:text-gray-100'
-      }`}
-    >
-      <div className="prose dark:prose-invert">
+    <div className="prose dark:prose-invert max-w-none prose-p:my-2 prose-ul:my-2 prose-li:my-1">
+        {/* Render markdown content */}
         <MarkdownRenderer source={content} />
-      </div>
-      {/* Collapsible Raw Content for 'show your work' */}
-      {!isError && (
-        <div className="mt-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={toggleExpanded}
-            className="flex items-center"
-          >
-            {expanded ? <ChevronUp className="mr-1" /> : <ChevronDown className="mr-1" />}
-            {expanded ? 'Hide reasoning details' : 'Show reasoning details'}
-          </Button>
-          {expanded && (
-            <pre className="mt-2 p-2 bg-gray-50 dark:bg-gray-700 rounded overflow-auto text-xs">
-              {content}
-            </pre>
-          )}
-        </div>
-      )}
     </div>
   );
 };
 
-export default ChatMessage;
-// This component is a simple chat message renderer that supports Markdown rendering and collapsible sections for detailed content.
+// No default export needed if using named export consistently

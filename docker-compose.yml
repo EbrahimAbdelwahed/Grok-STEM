@@ -40,6 +40,10 @@ services:
       - grok_stem_network
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
+    depends_on:
+      qdrant:
+        condition: service_healthy # Wait for Qdrant to be healthy before starting the backend
+
   # Frontend Service (React/Vite) - No changes needed here
   frontend:
     container_name: grok_stem_frontend
