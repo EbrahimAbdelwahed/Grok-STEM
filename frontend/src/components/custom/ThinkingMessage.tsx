@@ -1,49 +1,40 @@
 // frontend/src/components/custom/ThinkingMessage.tsx
 import React from 'react';
-import { motion } from 'framer-motion';
-import { BotMessageSquare } from 'lucide-react'; // Using Bot icon
 
-export const LoadingDots: React.FC = () => (
-  <span className="inline-flex items-center gap-1 ml-1">
-    {[0, 1, 2].map((dot) => (
-      <motion.span
-        key={dot}
-        className="w-1.5 h-1.5 bg-primary rounded-full" // Slightly larger dots
-        initial={{ opacity: 0.2 }}
-        animate={{ opacity: 1 }}
-        transition={{
-          duration: 0.6, // Slightly slower animation
-          repeat: Infinity,
-          repeatType: "reverse",
-          delay: dot * 0.2
-        }}
-      />
-    ))}
-  </span>
-);
+interface ThinkingMessageProps {
+  phase: 'reasoning' | 'steps' | 'plotting';
+}
 
+const phaseLabels: Record<ThinkingMessageProps['phase'], string> = {
+  reasoning: '🧠 Reasoning...',
+  steps: '🪜 Organizing steps...',
+  plotting: '📊 Generating plot...',
+};
 
-export const ThinkingMessage: React.FC = () => {
+export const ThinkingMessage: React.FC<ThinkingMessageProps> = ({ phase }) => {
   return (
-    <motion.div
-      className="flex items-start gap-3 px-4 w-full max-w-3xl mx-auto"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      {/* Icon */}
-      <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center ring-1 ring-inset ring-primary/20">
-         <BotMessageSquare className="h-5 w-5 text-primary" />
-      </div>
-      {/* Message Bubble */}
-      <div className="flex-1 overflow-hidden">
-        <div className="rounded-lg bg-muted p-3">
-          <p className="text-sm text-muted-foreground italic">
-            Grokking the problem...
-            <LoadingDots />
-          </p>
-        </div>
-      </div>
-    </motion.div>
+    <div className="flex items-center space-x-2 p-2 text-sm italic text-gray-500 dark:text-gray-400">
+      <svg
+        className="animate-spin h-4 w-4 text-gray-400"
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
+        <circle
+          className=" opacity-25"
+          cx="12"
+          cy="12"
+          r="10"
+          stroke="currentColor"
+          strokeWidth="4"
+        ></circle>
+        <path
+          className="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8v8H4z"
+        ></path>
+      </svg>
+      <span>{phaseLabels[phase]}</span>
+    </div>
   );
 };

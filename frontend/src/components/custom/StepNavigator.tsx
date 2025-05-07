@@ -1,39 +1,38 @@
 // frontend/src/components/custom/StepNavigator.tsx
 import React from 'react';
-import { ListOrdered } from 'lucide-react';
-import { ReasoningStep } from '../../interfaces/interfaces';
-import { cn } from '../../lib/utils';
 
-interface StepNavigatorProps {
-  steps: ReasoningStep[];
-  scrollToStep: (stepId: string) => void;
-  className?: string;
+interface Step {
+  id: string;
+  title: string;
 }
 
-export const StepNavigator: React.FC<StepNavigatorProps> = ({ steps, scrollToStep, className }) => {
-  if (!steps || steps.length === 0) {
-    return null; // Don't render if there are no steps
-  }
+interface StepNavigatorProps {
+  steps: Step[];
+}
+
+export const StepNavigator: React.FC<StepNavigatorProps> = ({ steps }) => {
+  const handleClick = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   return (
-    <div className={cn("mt-4 mb-2 p-3 border rounded-md bg-muted/50 dark:bg-secondary/30", className)}>
-      <h4 className="flex items-center text-sm font-semibold mb-2 text-foreground">
-        <ListOrdered className="w-4 h-4 mr-2" />
-        Solution Steps:
-      </h4>
-      <ol className="space-y-1 text-sm list-none pl-1"> {/* Use list-none if numbering comes from title */}
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow p-4 space-y-2">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Steps</h3>
+      <ul className="space-y-1">
         {steps.map((step) => (
           <li key={step.id}>
             <button
-              onClick={() => scrollToStep(step.id)}
-              className="text-primary hover:underline text-left hover:text-primary/80 transition-colors duration-150"
-              title={`Go to ${step.title}`} // Accessibility
+              onClick={() => handleClick(step.id)}
+              className="text-left w-full text-sm text-blue-600 dark:text-blue-400 hover:underline"
             >
               {step.title}
             </button>
           </li>
         ))}
-      </ol>
+      </ul>
     </div>
   );
 };

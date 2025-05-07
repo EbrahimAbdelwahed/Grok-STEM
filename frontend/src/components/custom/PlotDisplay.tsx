@@ -1,45 +1,48 @@
 // frontend/src/components/custom/PlotDisplay.tsx
-import React, { Suspense, lazy } from 'react';
-import { PlotlyData } from '../../interfaces/interfaces';
-
-// Lazy load Plotly component for better initial page load performance
-const Plot = lazy(() => import('react-plotly.js'));
+import React from 'react';
+import Plot from 'react-plotly.js';
 
 interface PlotDisplayProps {
-  plotlyData: PlotlyData;
+  plotlyJson: any;
 }
 
-export const PlotDisplay: React.FC<PlotDisplayProps> = ({ plotlyData }) => {
-  // Basic check if data is valid
-  if (!plotlyData || !plotlyData.data || !plotlyData.layout) {
-    return <div className="text-destructive text-sm">Invalid plot data received.</div>;
+export const PlotDisplay: React.FC<PlotDisplayProps> = ({ plotlyJson }) => {
+  if (!plotlyJson) {
+    return (
+      <div className="flex items-center justify-center p-4">
+        <svg
+          className="animate-spin h-6 w-6 text-gray-500"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+        >
+          <circle
+            className="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="4"
+          />
+          <path
+            className="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8v8H4z"
+          />
+        </svg>
+      </div>
+    );
   }
 
   return (
-    <div className="my-4 p-2 bg-card rounded-md border shadow-sm overflow-hidden">
-       {/* Suspense fallback while the Plotly component loads */}
-      <Suspense fallback={<div className="text-center p-4 text-muted-foreground">Loading plot...</div>}>
-        <Plot
-          data={plotlyData.data}
-          layout={{
-            ...plotlyData.layout,
-            autosize: true, // Ensure layout adapts
-             // Optional: Force a white background for plots even in dark mode for better contrast?
-             // paper_bgcolor: 'white',
-             // plot_bgcolor: 'rgba(240,240,240,0.8)', // Slightly off-white plot area
-             // font: { color: '#333' } // Dark font color
-          }}
-          config={{
-            responsive: true, // Make plot responsive
-            displaylogo: false, // Hide Plotly logo
-            // Add other config options if needed: https://plotly.com/javascript/configuration-options/
-             // modeBarButtonsToRemove: ['toImage', 'sendDataToCloud']
-          }}
-          useResizeHandler={true} // Automatically handles resizing
-          className="w-full h-full min-h-[300px]" // Ensure it takes space
-          style={{ width: '100%', height: '100%' }}
-        />
-      </Suspense>
+    <div className="w-full h-auto my-4">
+      <Plot
+        data={plotlyJson.data}
+        layout={{ ...plotlyJson.layout, autosize: true }}
+        config={{ responsive: true }}
+        useResizeHandler={true}
+        style={{ width: '100%', height: '100%' }}
+      />
     </div>
   );
 };
